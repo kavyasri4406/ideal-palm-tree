@@ -1,0 +1,25 @@
+{
+  "name": "AgriPredict — AI Agricultural Market Intelligence",
+  "short_name": "AgriPredict",
+  "description": "Real-time APMC mandi prices, wholesale vs retail rates, 30-day AI price forecasts, live weather radar, and 6-language voice chatbot for Indian farmers.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#FAF7F2",
+  "theme_color": "#5C7A3E",
+  "orientation": "portrait-primary",
+  "icons": [
+    {
+      "src": "/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icon.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    }
+  ],
+  "categories": ["agriculture", "business", "productivity", "utilities"]
+}
