@@ -1,5 +1,6 @@
 // Smart Mandi Price Threshold Alerts Manager
 // Stores, checks, and manages farmer price alerts with Web Push integration
+import { sendPushToThisDevice } from "@/lib/pushClient";
 
 export interface PriceAlert {
   id: string;
@@ -19,49 +20,25 @@ export interface PriceAlert {
 
 const STORAGE_KEY = "agri_price_alerts";
 
-const DEFAULT_ALERTS: PriceAlert[] = [
-  {
-    id: "alert_default_1",
-    cropId: "rice",
-    cropName: "Rice (Paddy)",
-    mandiName: "Nellore Mandi",
-    district: "Nellore",
-    state: "Andhra Pradesh",
-    condition: "above",
-    targetPrice: 2400,
-    unit: "₹/qtl",
-    active: true,
-    createdAt: new Date().toISOString(),
-    lastCheckedPrice: 2280
-  },
-  {
-    id: "alert_default_2",
-    cropId: "chilli",
-    cropName: "Red Chilli",
-    mandiName: "Guntur Mandi",
-    district: "Guntur",
-    state: "Andhra Pradesh",
-    condition: "below",
-    targetPrice: 15000,
-    unit: "₹/qtl",
-    active: true,
-    createdAt: new Date().toISOString(),
-    lastCheckedPrice: 16200
-  }
-];
+// Ids of sample alerts that older versions seeded automatically. The user never created
+// them (one fired on first load), so they are dropped when alerts are read.
+const LEGACY_SEEDED_ALERT_IDS = ["alert_default_1", "alert_default_2"];
 
 export function getPriceAlerts(): PriceAlert[] {
-  if (typeof window === "undefined") return DEFAULT_ALERTS;
+  if (typeof window === "undefined") return [];
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(DEFAULT_ALERTS));
-      return DEFAULT_ALERTS;
+    if (!raw) return [];
+    const parsed: unknown = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    const alerts = (parsed as PriceAlert[]).filter(a => !LEGACY_SEEDED_ALERT_IDS.includes(a.id));
+    if (alerts.length !== parsed.length) {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(alerts));
     }
-    return JSON.parse(raw);
+    return alerts;
   } catch (err) {
     console.error("Failed to load price alerts:", err);
-    return DEFAULT_ALERTS;
+    return [];
   }
 }
 
@@ -123,20 +100,11 @@ export function updateAlertTriggered(id: string, currentPrice: number): void {
 }
 
 /**
- * Dispatches both in-app notification & Native Web Push to lockscreen
+ * Sends the alert as a native Web Push to this device's lockscreen (if push is enabled here)
  */
 export async function dispatchPriceNotification(title: string, body: string): Promise<void> {
   try {
-    await fetch("/api/notifications/send", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        title,
-        body,
-        url: "/my-crops",
-        tag: "mandi-price-alert"
-      })
-    });
+    await sendPushToThisDevice({ title, body, url: "/my-crops", tag: "mandi-price-alert" });
   } catch (err) {
     console.warn("Could not send Web Push notification:", err);
   }

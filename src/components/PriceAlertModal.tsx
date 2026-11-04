@@ -1,9 +1,10 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useId, useRef } from "react";
 import { CROPS, formatPrice } from "@/lib/cropData";
 import { savePriceAlert, dispatchPriceNotification, PriceAlert } from "@/lib/priceAlerts";
 import { useApp } from "@/lib/AppContext";
+import { tr, cropName } from "@/lib/i18n";
 
 interface PriceAlertModalProps {
   isOpen: boolean;
@@ -27,8 +28,18 @@ const COMMON_MANDIS = [
   { name: "Indore Mandi", district: "Indore", state: "Madhya Pradesh" }
 ];
 
-export default function PriceAlertModal({
-  isOpen,
+/** Short price-unit label for a crop unit, e.g. "quintal" → "qtl", "dozen" → "dozen". */
+const unitShort = (unit: string) => (unit === "quintal" ? "qtl" : unit);
+
+export default function PriceAlertModal({ isOpen, ...props }: PriceAlertModalProps) {
+  if (!isOpen) return null;
+  // The dialog mounts fresh on every open and is re-keyed when the prefill props change, so its
+  // form state is initialised from the props instead of being reset by an effect.
+  const formKey = [props.initialCropId, props.initialMandiName, props.initialPrice, props.initialState, props.initialDistrict].join("|");
+  return <PriceAlertDialog key={formKey} {...props} />;
+}
+
+function PriceAlertDialog({
   onClose,
   initialCropId,
   initialMandiName,
@@ -36,35 +47,77 @@ export default function PriceAlertModal({
   initialState,
   initialDistrict,
   onAlertCreated
-}: PriceAlertModalProps) {
+}: Omit<PriceAlertModalProps, "isOpen">) {
   const { addNotification, language } = useApp();
+  const idPrefix = useId();
+  const titleId = `${idPrefix}-title`;
 
   const [selectedCropId, setSelectedCropId] = useState<string>(initialCropId || "rice");
   const [mandiName, setMandiName] = useState<string>(initialMandiName || "Nellore Mandi");
   const [district, setDistrict] = useState<string>(initialDistrict || "Nellore");
   const [state, setState] = useState<string>(initialState || "Andhra Pradesh");
   const [condition, setCondition] = useState<"above" | "below">("above");
-  const [targetPrice, setTargetPrice] = useState<number>(initialPrice ? Math.round(initialPrice * 1.1) : 2400);
+  const [targetPrice, setTargetPrice] = useState<number>(initialPrice ? Math.round(initialPrice * 1.08) : 2400);
   const [isSaving, setIsSaving] = useState(false);
   const [successMsg, setSuccessMsg] = useState("");
 
   const selectedCrop = CROPS.find(c => c.id === selectedCropId) || CROPS[0];
+  const unitLabel = unitShort(selectedCrop.unit);
+  const unitName = selectedCrop.unit === "quintal"
+    ? tr(language, { en: "Quintal", ta: "குவிண்டால்", te: "క్వింటాల్", kn: "ಕ್ವಿಂಟಾಲ್", ml: "ക്വിന്റൽ", hi: "क्विंटल" })
+    : selectedCrop.unit.charAt(0).toUpperCase() + selectedCrop.unit.slice(1);
+  const selectedCropName = cropName(selectedCrop, language);
+  const targetText = `₹${targetPrice.toLocaleString("en-IN")}/${unitLabel}`;
 
+  const L = {
+    invalid: tr(language, { en: "Please enter a valid target price greater than 0", ta: "0-க்கு மேல் சரியான இலக்கு விலையை உள்ளிடவும்", te: "దయచేసి 0 కంటే ఎక్కువ సరైన లక్ష్య ధరను నమోదు చేయండి", kn: "ದಯವಿಟ್ಟು 0 ಕ್ಕಿಂತ ಹೆಚ್ಚಿನ ಸರಿಯಾದ ಗುರಿ ಬೆಲೆ ನಮೂದಿಸಿ", ml: "ദയവായി 0-ൽ കൂടുതലുള്ള ശരിയായ ലക്ഷ്യ വില നൽകുക", hi: "कृपया 0 से ज़्यादा सही लक्ष्य भाव डालें" }),
+    alertSet: tr(language, { en: "🔔 Target Price Alert Set!", ta: "🔔 இலக்கு விலை எச்சரிக்கை அமைக்கப்பட்டது!", te: "🔔 లక్ష్య ధర హెచ్చరిక సెట్ అయింది!", kn: "🔔 ಗುರಿ ಬೆಲೆ ಎಚ್ಚರಿಕೆ ಹೊಂದಿಸಲಾಗಿದೆ!", ml: "🔔 ലക്ഷ്യ വില അറിയിപ്പ് സജ്ജമാക്കി!", hi: "🔔 लक्ष्य भाव अलर्ट लग गया!" }),
+    title: tr(language, { en: "Set Smart Price Alert", ta: "விலை எச்சரிக்கை அமை", te: "ధర హెచ్చరిక సెట్ చేయండి", kn: "ಬೆಲೆ ಎಚ್ಚರಿಕೆ ಹೊಂದಿಸಿ", ml: "വില അറിയിപ്പ് സജ്ജമാക്കുക", hi: "भाव अलर्ट लगाएं" }),
+    subtitle: tr(language, { en: "Instant browser & lockscreen notification when rates hit your target", ta: "விலை உங்கள் இலக்கை அடைந்ததும் உடனடி அறிவிப்பு", te: "ధర మీ లక్ష్యానికి చేరగానే వెంటనే నోటిఫికేషన్", kn: "ಬೆಲೆ ನಿಮ್ಮ ಗುರಿ ತಲುಪಿದ ತಕ್ಷಣ ಅಧಿಸೂಚನೆ", ml: "വില നിങ്ങളുടെ ലക്ഷ്യത്തിലെത്തുമ്പോൾ ഉടൻ അറിയിപ്പ്", hi: "भाव आपके लक्ष्य पर पहुंचते ही तुरंत सूचना" }),
+    close: tr(language, { en: "Close", ta: "மூடு", te: "మూసివేయి", kn: "ಮುಚ್ಚಿ", ml: "അടയ്ക്കുക", hi: "बंद करें" }),
+    activated: tr(language, { en: "Price Alert Activated!", ta: "விலை எச்சரிக்கை இயக்கப்பட்டது!", te: "ధర హెచ్చరిక ప్రారంభమైంది!", kn: "ಬೆಲೆ ಎಚ್ಚರಿಕೆ ಸಕ್ರಿಯವಾಗಿದೆ!", ml: "വില അറിയിപ്പ് സജീവമാക്കി!", hi: "भाव अलर्ट चालू हो गया!" }),
+    selectCrop: tr(language, { en: "Select Crop", ta: "பயிரைத் தேர்ந்தெடுக்கவும்", te: "పంటను ఎంచుకోండి", kn: "ಬೆಳೆ ಆರಿಸಿ", ml: "വിള തിരഞ്ഞെടുക്കുക", hi: "फसल चुनें" }),
+    current: tr(language, { en: "Current", ta: "தற்போது", te: "ప్రస్తుతం", kn: "ಈಗ", ml: "ഇപ്പോൾ", hi: "अभी" }),
+    selectMandi: tr(language, { en: "Select Mandi / APMC Yard", ta: "மண்டி / APMC சந்தையைத் தேர்ந்தெடுக்கவும்", te: "మండి / APMC యార్డ్ ఎంచుకోండి", kn: "ಮಂಡಿ / APMC ಯಾರ್ಡ್ ಆರಿಸಿ", ml: "മണ്ടി / APMC യാർഡ് തിരഞ്ഞെടുക്കുക", hi: "मंडी / APMC यार्ड चुनें" }),
+    allMandis: tr(language, { en: "All Regional Mandis", ta: "அனைத்து பகுதி மண்டிகள்", te: "అన్ని ప్రాంతీయ మండీలు", kn: "ಎಲ್ಲಾ ಪ್ರಾದೇಶಿಕ ಮಂಡಿಗಳು", ml: "എല്ലാ പ്രാദേശിക മണ്ടികളും", hi: "सभी क्षेत्रीय मंडियां" }),
+    trigger: tr(language, { en: "Trigger Condition", ta: "எச்சரிக்கை நிபந்தனை", te: "హెచ్చరిక షరతు", kn: "ಎಚ್ಚರಿಕೆ ಷರತ್ತು", ml: "അറിയിപ്പ് വ്യവസ്ഥ", hi: "अलर्ट की शर्त" }),
+    risesAbove: tr(language, { en: "Rises Above (≥)", ta: "மேல் உயர்ந்தால் (≥)", te: "పైకి పెరిగితే (≥)", kn: "ಮೇಲೆ ಏರಿದರೆ (≥)", ml: "മുകളിൽ ഉയർന്നാൽ (≥)", hi: "ऊपर जाए (≥)" }),
+    fallsBelow: tr(language, { en: "Falls Below (≤)", ta: "கீழே குறைந்தால் (≤)", te: "కిందకు తగ్గితే (≤)", kn: "ಕೆಳಗೆ ಇಳಿದರೆ (≤)", ml: "താഴെ കുറഞ്ഞാൽ (≤)", hi: "नीचे आए (≤)" }),
+    targetPrice: tr(language, { en: `Target Price (₹ per ${unitName})`, ta: `இலக்கு விலை (ஒரு ${unitName}க்கு ₹)`, te: `లక్ష్య ధర (ఒక ${unitName}కు ₹)`, kn: `ಗುರಿ ಬೆಲೆ (ಪ್ರತಿ ${unitName}ಗೆ ₹)`, ml: `ലക്ഷ്യ വില (ഓരോ ${unitName}നും ₹)`, hi: `लक्ष्य भाव (₹ प्रति ${unitName})` }),
+    baseline: tr(language, { en: "Baseline", ta: "அடிப்படை விலை", te: "బేస్ ధర", kn: "ಮೂಲ ಬೆಲೆ", ml: "അടിസ്ഥാന വില", hi: "आधार भाव" }),
+    placeholder: tr(language, { en: "e.g. 2400", ta: "எ.கா. 2400", te: "ఉదా. 2400", kn: "ಉದಾ. 2400", ml: "ഉദാ. 2400", hi: "जैसे 2400" }),
+    previewLabel: tr(language, { en: "Notification Preview:", ta: "அறிவிப்பு முன்னோட்டம்:", te: "నోటిఫికేషన్ ముందుచూపు:", kn: "ಅಧಿಸೂಚನೆ ಮುನ್ನೋಟ:", ml: "അറിയിപ്പ് പ്രിവ്യൂ:", hi: "सूचना की झलक:" }),
+    preview: tr(language, {
+      en: `You'll get an instant lockscreen alert when ${mandiName} reaches ${targetText}.`,
+      ta: `${mandiName} விலை ${targetText} ஐ அடைந்ததும் உங்களுக்கு உடனடி அறிவிப்பு வரும்.`,
+      te: `${mandiName} ధర ${targetText} కి చేరగానే మీకు వెంటనే హెచ్చరిక వస్తుంది.`,
+      kn: `${mandiName} ಬೆಲೆ ${targetText} ತಲುಪಿದ ತಕ್ಷಣ ನಿಮಗೆ ಎಚ್ಚರಿಕೆ ಬರುತ್ತದೆ.`,
+      ml: `${mandiName} വില ${targetText} എത്തുമ്പോൾ നിങ്ങൾക്ക് ഉടൻ അറിയിപ്പ് ലഭിക്കും.`,
+      hi: `${mandiName} का भाव ${targetText} पहुंचते ही आपको तुरंत अलर्ट मिलेगा।`,
+    }),
+    cancel: tr(language, { en: "Cancel", ta: "ரத்து செய்", te: "రద్దు చేయి", kn: "ರದ್ದುಮಾಡಿ", ml: "റദ്ദാക്കുക", hi: "रद्द करें" }),
+    activating: tr(language, { en: "Activating Alert...", ta: "எச்சரிக்கை இயக்கப்படுகிறது...", te: "హెచ్చరిక ప్రారంభిస్తున్నాం...", kn: "ಎಚ್ಚರಿಕೆ ಸಕ್ರಿಯಗೊಳಿಸಲಾಗುತ್ತಿದೆ...", ml: "അറിയിപ്പ് സജീവമാക്കുന്നു...", hi: "अलर्ट चालू हो रहा है..." }),
+    save: tr(language, { en: "🔔 Set Price Alert", ta: "🔔 விலை எச்சரிக்கை அமை", te: "🔔 ధర హెచ్చరిక సెట్ చేయండి", kn: "🔔 ಬೆಲೆ ಎಚ್ಚರಿಕೆ ಹೊಂದಿಸಿ", ml: "🔔 വില അറിയിപ്പ് സജ്ജമാക്കുക", hi: "🔔 भाव अलर्ट लगाएं" }),
+  };
+
+  // Close on Escape.
   useEffect(() => {
-    if (initialCropId) setSelectedCropId(initialCropId);
-    if (initialMandiName) setMandiName(initialMandiName);
-    if (initialPrice) {
-      setTargetPrice(condition === "above" ? Math.round(initialPrice * 1.08) : Math.round(initialPrice * 0.92));
-    }
-    if (initialState) setState(initialState);
-    if (initialDistrict) setDistrict(initialDistrict);
-  }, [initialCropId, initialMandiName, initialPrice, initialState, initialDistrict, isOpen]);
+    const handleKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    document.addEventListener("keydown", handleKey);
+    return () => document.removeEventListener("keydown", handleKey);
+  }, [onClose]);
 
-  if (!isOpen) return null;
+  // Don't let the post-save auto-close fire after the dialog was already closed (it could close a re-opened one).
+  const closeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => () => {
+    if (closeTimerRef.current) clearTimeout(closeTimerRef.current);
+  }, []);
 
   const handleSave = async () => {
     if (targetPrice <= 0) {
-      alert("Please enter a valid target price greater than 0");
+      alert(L.invalid);
       return;
     }
 
@@ -77,12 +130,28 @@ export default function PriceAlertModal({
       state,
       condition,
       targetPrice,
-      unit: "₹/qtl",
+      unit: `₹/${unitLabel}`,
       lastCheckedPrice: initialPrice || selectedCrop.basePrice
     });
 
-    const alertTitle = `🔔 Target Price Alert Set!`;
-    const alertBody = `We'll notify you when ${mandiName} ${selectedCrop.name} ${condition === "above" ? "crosses" : "drops below"} ₹${targetPrice.toLocaleString("en-IN")}/qtl`;
+    const alertTitle = L.alertSet;
+    const alertBody = condition === "above"
+      ? tr(language, {
+          en: `We'll notify you when ${mandiName} ${selectedCropName} crosses ${targetText}`,
+          ta: `${mandiName} ${selectedCropName} விலை ${targetText} ஐ தாண்டும்போது உங்களுக்கு தெரிவிப்போம்`,
+          te: `${mandiName} ${selectedCropName} ధర ${targetText} దాటినప్పుడు మీకు తెలియజేస్తాం`,
+          kn: `${mandiName} ${selectedCropName} ಬೆಲೆ ${targetText} ದಾಟಿದಾಗ ನಿಮಗೆ ತಿಳಿಸುತ್ತೇವೆ`,
+          ml: `${mandiName} ${selectedCropName} വില ${targetText} കടക്കുമ്പോൾ ഞങ്ങൾ അറിയിക്കും`,
+          hi: `${mandiName} में ${selectedCropName} का भाव ${targetText} से ऊपर जाने पर हम आपको बताएंगे`,
+        })
+      : tr(language, {
+          en: `We'll notify you when ${mandiName} ${selectedCropName} drops below ${targetText}`,
+          ta: `${mandiName} ${selectedCropName} விலை ${targetText} க்குக் கீழே குறையும்போது உங்களுக்கு தெரிவிப்போம்`,
+          te: `${mandiName} ${selectedCropName} ధర ${targetText} కంటే తగ్గినప్పుడు మీకు తెలియజేస్తాం`,
+          kn: `${mandiName} ${selectedCropName} ಬೆಲೆ ${targetText} ಗಿಂತ ಇಳಿದಾಗ ನಿಮಗೆ ತಿಳಿಸುತ್ತೇವೆ`,
+          ml: `${mandiName} ${selectedCropName} വില ${targetText}-ൽ താഴെ പോകുമ്പോൾ ഞങ്ങൾ അറിയിക്കും`,
+          hi: `${mandiName} में ${selectedCropName} का भाव ${targetText} से नीचे आने पर हम आपको बताएंगे`,
+        });
 
     // 1. In-app notification
     addNotification({
@@ -97,7 +166,7 @@ export default function PriceAlertModal({
     setSuccessMsg(alertBody);
     if (onAlertCreated) onAlertCreated(newAlert);
 
-    setTimeout(() => {
+    closeTimerRef.current = setTimeout(() => {
       setIsSaving(false);
       setSuccessMsg("");
       onClose();
@@ -116,7 +185,7 @@ export default function PriceAlertModal({
       justifyContent: "center",
       padding: 16
     }}>
-      <div className="card" style={{
+      <div className="card" role="dialog" aria-modal="true" aria-labelledby={titleId} style={{
         background: "var(--bg-card)",
         border: "1px solid var(--border)",
         borderRadius: 20,
@@ -142,16 +211,18 @@ export default function PriceAlertModal({
               🔔
             </div>
             <div>
-              <h3 style={{ fontSize: 18, fontWeight: 700, color: "var(--text)" }}>
-                Set Smart Price Alert
+              <h3 id={titleId} style={{ fontSize: 18, fontWeight: 700, color: "var(--text)" }}>
+                {L.title}
               </h3>
               <p style={{ fontSize: 12, color: "var(--text-muted)", marginTop: 2 }}>
-                Instant browser & lockscreen notification when rates hit your target
+                {L.subtitle}
               </p>
             </div>
           </div>
           <button
+            type="button"
             onClick={onClose}
+            aria-label={L.close}
             style={{ background: "none", border: "none", fontSize: 20, cursor: "pointer", color: "var(--text-muted)" }}
           >
             ✕
@@ -167,17 +238,18 @@ export default function PriceAlertModal({
             textAlign: "center"
           }}>
             <div style={{ fontSize: 32, marginBottom: 8 }}>✅</div>
-            <div style={{ fontSize: 15, fontWeight: 700, color: "#047857" }}>Price Alert Activated!</div>
+            <div style={{ fontSize: 15, fontWeight: 700, color: "#047857" }}>{L.activated}</div>
             <p style={{ fontSize: 13, color: "var(--text)", marginTop: 6 }}>{successMsg}</p>
           </div>
         ) : (
           <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
             {/* Crop Selector */}
             <div>
-              <label style={{ display: "block", fontSize: 12.5, fontWeight: 600, color: "var(--text-muted)", marginBottom: 6 }}>
-                🌾 Select Crop
+              <label htmlFor={`${idPrefix}-crop`} style={{ display: "block", fontSize: 12.5, fontWeight: 600, color: "var(--text-muted)", marginBottom: 6 }}>
+                🌾 {L.selectCrop}
               </label>
               <select
+                id={`${idPrefix}-crop`}
                 value={selectedCropId}
                 onChange={e => {
                   setSelectedCropId(e.target.value);
@@ -191,7 +263,7 @@ export default function PriceAlertModal({
               >
                 {CROPS.map(c => (
                   <option key={c.id} value={c.id}>
-                    {c.emoji} {c.name} (Current: {formatPrice(c.basePrice)}/qtl)
+                    {c.emoji} {cropName(c, language)} ({L.current}: {formatPrice(c.basePrice)}/{unitShort(c.unit)})
                   </option>
                 ))}
               </select>
@@ -199,11 +271,12 @@ export default function PriceAlertModal({
 
             {/* Mandi Selector */}
             <div>
-              <label style={{ display: "block", fontSize: 12.5, fontWeight: 600, color: "var(--text-muted)", marginBottom: 6 }}>
-                🏢 Select Mandi / APMC Yard
+              <label htmlFor={`${idPrefix}-mandi`} style={{ display: "block", fontSize: 12.5, fontWeight: 600, color: "var(--text-muted)", marginBottom: 6 }}>
+                🏢 {L.selectMandi}
               </label>
               <div style={{ display: "flex", gap: 8 }}>
                 <select
+                  id={`${idPrefix}-mandi`}
                   value={mandiName}
                   onChange={e => {
                     const match = COMMON_MANDIS.find(m => m.name === e.target.value);
@@ -221,7 +294,7 @@ export default function PriceAlertModal({
                       📍 {m.name} ({m.district}, {m.state})
                     </option>
                   ))}
-                  <option value="All Mandis">📍 All Regional Mandis</option>
+                  <option value="All Mandis">📍 {L.allMandis}</option>
                 </select>
               </div>
             </div>
@@ -229,12 +302,13 @@ export default function PriceAlertModal({
             {/* Condition: Above vs Below */}
             <div>
               <label style={{ display: "block", fontSize: 12.5, fontWeight: 600, color: "var(--text-muted)", marginBottom: 6 }}>
-                ⚡ Trigger Condition
+                ⚡ {L.trigger}
               </label>
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
                 <button
                   type="button"
                   onClick={() => setCondition("above")}
+                  aria-pressed={condition === "above"}
                   style={{
                     padding: "10px",
                     borderRadius: 12,
@@ -252,12 +326,13 @@ export default function PriceAlertModal({
                   }}
                 >
                   <span>📈</span>
-                  <span>Rises Above (≥)</span>
+                  <span>{L.risesAbove}</span>
                 </button>
 
                 <button
                   type="button"
                   onClick={() => setCondition("below")}
+                  aria-pressed={condition === "below"}
                   style={{
                     padding: "10px",
                     borderRadius: 12,
@@ -275,7 +350,7 @@ export default function PriceAlertModal({
                   }}
                 >
                   <span>📉</span>
-                  <span>Falls Below (≤)</span>
+                  <span>{L.fallsBelow}</span>
                 </button>
               </div>
             </div>
@@ -283,11 +358,11 @@ export default function PriceAlertModal({
             {/* Target Price */}
             <div>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
-                <label style={{ fontSize: 12.5, fontWeight: 600, color: "var(--text-muted)" }}>
-                  🎯 Target Price (₹ per Quintal)
+                <label htmlFor={`${idPrefix}-target`} style={{ fontSize: 12.5, fontWeight: 600, color: "var(--text-muted)" }}>
+                  🎯 {L.targetPrice}
                 </label>
                 <span style={{ fontSize: 11.5, color: "var(--primary)", fontWeight: 600 }}>
-                  Baseline: {formatPrice(selectedCrop.basePrice)}/qtl
+                  {L.baseline}:{formatPrice(selectedCrop.basePrice)}/{unitLabel}
                 </span>
               </div>
               <div style={{ position: "relative" }}>
@@ -295,12 +370,13 @@ export default function PriceAlertModal({
                   ₹
                 </span>
                 <input
+                  id={`${idPrefix}-target`}
                   type="number"
                   value={targetPrice}
                   onChange={e => setTargetPrice(Number(e.target.value) || 0)}
                   className="input"
                   style={{ width: "100%", paddingLeft: 34, borderRadius: 10, fontSize: 16, fontWeight: 700 }}
-                  placeholder="e.g. 2400"
+                  placeholder={L.placeholder}
                 />
               </div>
             </div>
@@ -319,7 +395,7 @@ export default function PriceAlertModal({
             }}>
               <span style={{ fontSize: 18 }}>💡</span>
               <div>
-                <strong>Notification Preview:</strong> You'll get an instant lockscreen alert when <strong>{mandiName}</strong> reaches <strong>₹{targetPrice.toLocaleString("en-IN")}/qtl</strong>.
+                <strong>{L.previewLabel}</strong> {L.preview}
               </div>
             </div>
 
@@ -331,7 +407,7 @@ export default function PriceAlertModal({
                 className="btn btn-secondary"
                 style={{ flex: 1, borderRadius: 12 }}
               >
-                Cancel
+                {L.cancel}
               </button>
               <button
                 type="button"
@@ -340,7 +416,7 @@ export default function PriceAlertModal({
                 className="btn btn-primary"
                 style={{ flex: 2, borderRadius: 12, fontWeight: 700 }}
               >
-                {isSaving ? "Activating Alert..." : "🔔 Set Price Alert"}
+                {isSaving ? L.activating : L.save}
               </button>
             </div>
           </div>

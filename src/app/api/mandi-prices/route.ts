@@ -1,33 +1,118 @@
 import { getStrictDistrictMandis } from "@/lib/mandiDatabase";
+import { CROPS, type MandiInfo } from "@/lib/cropData";
+import { groqChat, hasGroqKey, parseJsonReply } from "@/lib/groq";
+import { getAgmarknetPrices, hasAgmarknetKey } from "@/lib/agmarknet";
 import { NextRequest, NextResponse } from "next/server";
 
-// APMC Mandi Intelligence using Groq AI and Agmarknet Database
+// APMC mandi rates. Official Agmarknet prices (data.gov.in) when DATA_GOV_API_KEY is set and the
+// crop was reported today; otherwise estimates (AI-generated when a Groq key is set, else modelled
+// from each crop's base price).
+
+const AGMARKNET_SOURCE = "Agmarknet, Govt. of India (data.gov.in)";
+const MAX_LIVE_MANDIS = 8;
+const AI_SOURCE = "AI-estimated indicative rates (not official Agmarknet data)";
+const MODEL_SOURCE = "Indicative estimate from AgriPredict price model (verify at agmarknet.gov.in)";
+
+function uid(): string {
+  return Math.random().toString(36).slice(2, 7);
+}
+
+function findCrop(crop: string) {
+  const q = crop.trim().toLowerCase();
+  return CROPS.find(c => c.name.toLowerCase() === q || c.id === q);
+}
+
+function toNumber(v: unknown): number | null {
+  const n = typeof v === "string" ? parseFloat(v) : v;
+  return typeof n === "number" && Number.isFinite(n) ? n : null;
+}
+
+function normalizeAiMandis(raw: unknown, crop: string, district: string, state: string): MandiInfo[] | null {
+  if (!Array.isArray(raw)) return null;
+  const mandis: MandiInfo[] = [];
+  raw.forEach((m, i) => {
+    const price = toNumber(m?.price);
+    if (typeof m?.mandiName !== "string" || price === null || price <= 0) return;
+    mandis.push({
+      id: `api_mandi_${crop}_${district}_${i}_${uid()}`,
+      mandiName: m.mandiName,
+      district: typeof m.district === "string" ? m.district : district,
+      state: typeof m.state === "string" ? m.state : state,
+      distanceKm: toNumber(m.distanceKm) ?? 0,
+      price,
+      priceDiff: toNumber(m.priceDiff) ?? 0,
+      arrivalsTons: toNumber(m.arrivalsTons) ?? 0,
+      trend: m.trend === "up" || m.trend === "down" ? m.trend : "stable",
+      isBestChoice: m.isBestChoice === true
+    });
+  });
+  return mandis.length > 0 ? mandis : null;
+}
 
 export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url);
-  const crop = searchParams.get("crop") || "Rice";
-  const variety = searchParams.get("variety") || "";
-  const state = searchParams.get("state") || "Andhra Pradesh";
-  const district = searchParams.get("district") || "Chittoor";
+  const crop = (searchParams.get("crop") || "Rice").slice(0, 80);
+  const variety = (searchParams.get("variety") || "").slice(0, 80);
+  const state = (searchParams.get("state") || "Andhra Pradesh").slice(0, 80);
+  const district = (searchParams.get("district") || "Chittoor").slice(0, 80);
+  const knownCrop = findCrop(crop);
+  const unit = knownCrop?.unit || "quintal";
 
-  // Check if Groq API key exists
-  const groqApiKey = process.env.GROQ_API_KEY;
-  if (groqApiKey) {
+  // Official prices are ₹/quintal, so only use them for crops priced per quintal
+  if (knownCrop && unit === "quintal" && hasAgmarknetKey()) {
     try {
-      const prompt = `System: You are an Indian APMC Agmarknet Live Market Intelligence API.
-Provide real live wholesale mandi rates, retail market prices, and dynamic APMC mandi comparison for:
+      const records = (await getAgmarknetPrices(knownCrop.id, state, district)).slice(0, MAX_LIVE_MANDIS);
+      if (records.length > 0) {
+        const avg = Math.round(records.reduce((acc, r) => acc + r.modalPrice, 0) / records.length);
+        const best = Math.max(...records.map(r => r.modalPrice));
+        const topMandis: MandiInfo[] = records.map((r, i) => ({
+          id: `agmark_${knownCrop.id}_${i}_${uid()}`,
+          mandiName: r.market,
+          district: r.district,
+          state: r.state,
+          distanceKm: 0,
+          price: r.modalPrice,
+          priceDiff: r.modalPrice - avg,
+          arrivalsTons: 0,
+          trend: "stable",
+          isBestChoice: r.modalPrice === best,
+          // Some markets omit min/max; leave them unset rather than showing ₹0
+          minPrice: r.minPrice > 0 ? r.minPrice : undefined,
+          maxPrice: r.maxPrice > 0 ? r.maxPrice : undefined,
+          arrivalDate: r.arrivalDate
+        }));
+        return NextResponse.json({
+          crop,
+          variety: variety || "All Varieties",
+          location: `${district}, ${state}`,
+          unit,
+          source: AGMARKNET_SOURCE,
+          live: true,
+          priceDate: records[0].arrivalDate,
+          lastUpdated: new Date().toISOString(),
+          wholesaleMandiRateKg: Math.round(avg / 10) / 10,
+          wholesaleMandiRateQuintal: avg,
+          retailRateKg: null,
+          retailRateQuintal: null,
+          marketTrend: "stable",
+          topMandis
+        });
+      }
+    } catch (err) {
+      console.warn("Agmarknet prices unavailable, falling back to estimates:", err instanceof Error ? err.message : err);
+    }
+  }
+
+  if (hasGroqKey()) {
+    const prompt = `You estimate Indian APMC mandi wholesale and retail prices for:
 Crop: ${crop}
 Variety: ${variety || "All Varieties"}
 State: ${state}
 District: ${district}, India.
+All "price" values must be in ₹ per ${unit}.
 
-Return ONLY a valid raw JSON object (no backticks) matching this structure:
+Return ONLY a JSON object matching this structure:
 {
-  "crop": "${crop}",
-  "variety": "${variety}",
-  "location": "${district}, ${state}",
-  "source": "Agmarknet APMC Real-Time Market Intelligence",
-  "lastUpdated": "Live Today",
   "wholesaleMandiRateKg": 15,
   "wholesaleMandiRateQuintal": 1500,
   "retailRateKg": 35,
@@ -40,93 +125,70 @@ Return ONLY a valid raw JSON object (no backticks) matching this structure:
   ]
 }`;
 
-      const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "Authorization": `Bearer ${groqApiKey}`,
-          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AgriPredict/1.0"
-        },
-        body: JSON.stringify({
-          model: "qwen/qwen3.8-27b",
-          messages: [{ role: "user", content: prompt }],
-          temperature: 0.2,
-          max_tokens: 1024
-        })
-      });
+    const result = await groqChat({
+      model: process.env.GROQ_TEXT_MODEL || "qwen/qwen3.8-27b",
+      messages: [{ role: "user", content: prompt }],
+      temperature: 0.2,
+      maxTokens: 1500,
+      json: true,
+      timeoutMs: 20000
+    });
 
-      if (res.ok) {
-        const data = await res.json();
-        const text = data.choices?.[0]?.message?.content;
-        if (text) {
-          const cleaned = text.replace(/```json\n?/g, "").replace(/```\n?/g, "").trim();
-          const parsed = JSON.parse(cleaned);
-          if (parsed.topMandis) {
-            parsed.topMandis = parsed.topMandis.map((m: any, i: number) => ({
-              ...m,
-              id: `api_mandi_${crop}_${district}_${i}_${Math.random().toString(36).substr(2, 5)}`
-            }));
-          }
-          return NextResponse.json(parsed);
-        }
+    if (result.ok) {
+      const parsed = parseJsonReply(result.content);
+      const topMandis = normalizeAiMandis(parsed?.topMandis, crop, district, state);
+      if (parsed && topMandis) {
+        return NextResponse.json({
+          ...parsed,
+          crop,
+          variety: variety || "All Varieties",
+          location: `${district}, ${state}`,
+          unit,
+          source: AI_SOURCE,
+          live: false,
+          lastUpdated: new Date().toISOString(),
+          topMandis
+        });
       }
-    } catch (err) {
-      console.warn("Groq Mandi API fallback trigger:", err);
     }
+    console.warn("Groq mandi estimate unavailable, using price model:", result.ok ? "unparseable reply" : result.error);
   }
 
-  // Dynamic Real APMC Mandi Construction based on selected State & District!
+  // Modelled mandi rates built from the selected State & District's real APMC yards
   const mandiNames = getStrictDistrictMandis(state, district);
 
-  // Calculate realistic crop pricing
-  const isTotapuri = crop.toLowerCase().includes("mango") && variety.toLowerCase().includes("totapuri");
-  const isAlphonso = crop.toLowerCase().includes("mango") && variety.toLowerCase().includes("alphonso");
-  const isPomegranate = crop.toLowerCase().includes("pomegranate");
-  const isChilli = crop.toLowerCase().includes("chilli");
-  const isOnion = crop.toLowerCase().includes("onion");
-  const isTomato = crop.toLowerCase().includes("tomato");
-  const isApple = crop.toLowerCase().includes("apple");
-  const isBanana = crop.toLowerCase().includes("banana");
-  const isRice = crop.toLowerCase().includes("rice");
-  const isWheat = crop.toLowerCase().includes("wheat");
-
-  let wholesaleKg = 25;
+  const cropLower = crop.toLowerCase();
+  const varietyLower = variety.toLowerCase();
   let wholesaleQ = 2500;
-  let retailKg = 45;
   let retailQ = 4500;
 
-  if (isTotapuri) { wholesaleKg = 8; wholesaleQ = 800; retailKg = 25; retailQ = 2500; }
-  else if (isAlphonso) { wholesaleKg = 65; wholesaleQ = 6500; retailKg = 180; retailQ = 18000; }
-  else if (isPomegranate) { wholesaleKg = 60; wholesaleQ = 6000; retailKg = 120; retailQ = 12000; }
-  else if (isChilli) { wholesaleKg = 145; wholesaleQ = 14500; retailKg = 190; retailQ = 19000; }
-  else if (isOnion) { wholesaleKg = 14; wholesaleQ = 1400; retailKg = 35; retailQ = 3500; }
-  else if (isTomato) { wholesaleKg = 12; wholesaleQ = 1200; retailKg = 30; retailQ = 3000; }
-  else if (isApple) { wholesaleKg = 55; wholesaleQ = 5500; retailKg = 140; retailQ = 14000; }
-  else if (isBanana) { wholesaleKg = 11; wholesaleQ = 1100; retailKg = 25; retailQ = 2500; }
-  else if (isRice) { wholesaleKg = 36; wholesaleQ = 3600; retailKg = 55; retailQ = 5500; }
-  else if (isWheat) { wholesaleKg = 24; wholesaleQ = 2400; retailKg = 38; retailQ = 3800; }
+  if (cropLower.includes("mango") && varietyLower.includes("totapuri")) { wholesaleQ = 800; retailQ = 2500; }
+  else if (cropLower.includes("mango") && varietyLower.includes("alphonso")) { wholesaleQ = 6500; retailQ = 18000; }
+  else if (knownCrop) { wholesaleQ = knownCrop.basePrice; retailQ = Math.round(knownCrop.basePrice * 1.6); }
+  else if (cropLower.includes("pomegranate")) { wholesaleQ = 6000; retailQ = 12000; }
+  else if (cropLower.includes("chilli")) { wholesaleQ = 14500; retailQ = 19000; }
+  else if (cropLower.includes("onion")) { wholesaleQ = 1400; retailQ = 3500; }
+  else if (cropLower.includes("tomato")) { wholesaleQ = 1200; retailQ = 3000; }
+  else if (cropLower.includes("apple")) { wholesaleQ = 5500; retailQ = 14000; }
+  else if (cropLower.includes("rice")) { wholesaleQ = 3600; retailQ = 5500; }
+  else if (cropLower.includes("wheat")) { wholesaleQ = 2400; retailQ = 3800; }
 
-  const basePrice = wholesaleQ;
-  const topMandis = mandiNames.map((name, idx) => {
-    const isFirst = idx === 0;
+  // Price steps scale with the crop's price so low-priced units (e.g. ₹/dozen) stay sensible
+  const round = (n: number) => (wholesaleQ >= 100 ? Math.round(n) : Math.round(n * 10) / 10);
+  const topMandis: MandiInfo[] = mandiNames.map((name, idx) => {
     const isLast = idx === mandiNames.length - 1;
-    const distanceKm = idx === 0 ? 6 : idx * 22;
-    const priceBoost = idx === 0 ? 0 : idx * 180;
-    const price = basePrice + priceBoost;
-    const priceDiff = priceBoost;
-    const arrivalsTons = Math.max(80, 520 - idx * 60);
-
+    const priceBoost = round(wholesaleQ * 0.035 * idx);
     return {
-      id: `mandi_${district}_${idx}_${Math.random().toString(36).substr(2, 5)}`,
+      id: `mandi_${district}_${idx}_${uid()}`,
       mandiName: name,
-      district: isLast ? "State Hub" : district,
-      state: state,
-      distanceKm: distanceKm,
-      price: price,
-      priceDiff: priceDiff,
-      arrivalsTons: arrivalsTons,
+      district: isLast && idx > 0 ? "State Hub" : district,
+      state,
+      distanceKm: idx === 0 ? 6 : idx * 22,
+      price: round(wholesaleQ + priceBoost),
+      priceDiff: priceBoost,
+      arrivalsTons: Math.max(80, 520 - idx * 60),
       trend: priceBoost > 0 ? "up" : "stable",
-      isBestChoice: isLast || idx === mandiNames.length - 1
+      isBestChoice: isLast
     };
   });
 
@@ -134,13 +196,15 @@ Return ONLY a valid raw JSON object (no backticks) matching this structure:
     crop,
     variety: variety || "All Varieties",
     location: `${district}, ${state}`,
-    source: "Agmarknet APMC Real-Time Market Intelligence",
-    lastUpdated: "Live Today",
-    wholesaleMandiRateKg: wholesaleKg,
-    wholesaleMandiRateQuintal: wholesaleQ,
-    retailRateKg: retailKg,
-    retailRateQuintal: retailQ,
+    unit,
+    source: MODEL_SOURCE,
+    live: false,
+    lastUpdated: new Date().toISOString(),
+    wholesaleMandiRateKg: unit === "quintal" ? round(wholesaleQ / 100) : null,
+    wholesaleMandiRateQuintal: unit === "quintal" ? wholesaleQ : null,
+    retailRateKg: unit === "quintal" ? round(retailQ / 100) : null,
+    retailRateQuintal: unit === "quintal" ? retailQ : null,
     marketTrend: "stable",
-    topMandis: topMandis
+    topMandis
   });
 }

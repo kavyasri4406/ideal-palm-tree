@@ -1,29 +1,35 @@
 "use client";
 import { usePathname, useRouter } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useEffect, useState, useSyncExternalStore } from "react";
 import Sidebar from "@/components/Sidebar";
-import { getCurrentUser } from "@/lib/auth";
+import { getCurrentUser, syncSession } from "@/lib/auth";
 import { useApp } from "@/lib/AppContext";
 
 import NotificationManager from "@/components/NotificationManager";
 
 const PUBLIC = ["/login"];
 
+const noopSubscribe = () => () => {};
+
 export default function ClientLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
   const { toast } = useApp();
-  const [ready, setReady] = useState(false);
+  // false during SSR and hydration, true afterwards — keeps the server loading screen hydration-safe.
+  const isClient = useSyncExternalStore(noopSubscribe, () => true, () => false);
   const isPublic = PUBLIC.includes(pathname);
+  // Re-checked on every render so a logged-out user never sees protected content (e.g. Back after logout).
+  const hasUser = isClient && !!getCurrentUser();
+  const ready = isPublic || hasUser;
   const [mobileOpen, setMobileOpen] = useState(false);
+  // Bumped when the Supabase session changes (expired, signed out elsewhere, profile refreshed)
+  const [, setSessionVersion] = useState(0);
+
+  useEffect(() => syncSession(() => setSessionVersion(v => v + 1)), []);
 
   useEffect(() => {
-    if (!isPublic) {
-      const user = getCurrentUser();
-      if (!user) { router.replace("/login"); return; }
-    }
-    setReady(true);
-  }, [pathname, isPublic, router]);
+    if (isClient && !isPublic && !hasUser) router.replace("/login");
+  }, [isClient, isPublic, hasUser, pathname, router]);
 
   if (isPublic) return <>{children}</>;
   if (!ready) return (
@@ -50,6 +56,8 @@ export default function ClientLayout({ children }: { children: React.ReactNode }
       }}>
         <button
           onClick={() => setMobileOpen(true)}
+          aria-label="Open menu"
+          aria-expanded={mobileOpen}
           style={{ background: "none", border: "none", fontSize: 24, cursor: "pointer", color: "var(--sidebar-text)" }}
         >
           ☰
@@ -83,7 +91,7 @@ export default function ClientLayout({ children }: { children: React.ReactNode }
 
       {/* Global Toast Notification */}
       {toast && (
-        <div className="fade-in" style={{
+        <div className="fade-in" role="status" aria-live="polite" style={{
           position: "fixed",
           bottom: 24,
           right: 24,

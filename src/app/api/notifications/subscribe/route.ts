@@ -2,27 +2,38 @@ import { NextRequest, NextResponse } from "next/server";
 import {
   saveSubscription,
   removeSubscription,
-  getAllSubscriptions,
+  countSubscriptions,
+  getVapidPublicKey,
   type PushSubscriptionData
 } from "@/lib/pushSubscriptionStore";
 
 export async function GET() {
-  const publicKey = process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY || "BLy4eqWH8LXxPSm0yrV27MftxuZEJ8IpUY_7X_j-ZQkUwFVMPqk_9E1AxmOWFfb2pNeEDjNbyLuDvtRJPm1Eem8";
-  const subs = getAllSubscriptions();
+  const publicKey = getVapidPublicKey();
+  if (!publicKey) {
+    return NextResponse.json(
+      { publicKey: null, status: "unconfigured", error: "Push notifications are not configured on this server." },
+      { status: 503 }
+    );
+  }
 
   return NextResponse.json({
     publicKey,
-    activeSubscribers: subs.length,
+    activeSubscribers: await countSubscriptions(),
     status: "online"
   });
 }
 
 export async function POST(req: NextRequest) {
   try {
-    const body = await req.json();
-    const { subscription, userAgent } = body;
+    const body = await req.json().catch(() => null);
+    const { subscription, userAgent } = body && typeof body === "object" ? body : ({} as Record<string, never>);
 
-    if (!subscription || !subscription.endpoint || !subscription.keys) {
+    if (
+      typeof subscription?.endpoint !== "string" ||
+      !subscription.endpoint.startsWith("https://") ||
+      typeof subscription.keys?.p256dh !== "string" ||
+      typeof subscription.keys?.auth !== "string"
+    ) {
       return NextResponse.json(
         { error: "Invalid subscription payload" },
         { status: 400 }
@@ -31,12 +42,12 @@ export async function POST(req: NextRequest) {
 
     const subData: PushSubscriptionData = {
       endpoint: subscription.endpoint,
-      keys: subscription.keys,
-      expirationTime: subscription.expirationTime,
-      userAgent: userAgent || req.headers.get("user-agent") || ""
+      keys: { p256dh: subscription.keys.p256dh, auth: subscription.keys.auth },
+      expirationTime: typeof subscription.expirationTime === "number" ? subscription.expirationTime : null,
+      userAgent: String(userAgent || req.headers.get("user-agent") || "").slice(0, 300)
     };
 
-    const saved = saveSubscription(subData);
+    const saved = await saveSubscription(subData);
     if (!saved) {
       return NextResponse.json(
         { error: "Failed to persist subscription" },
@@ -48,27 +59,26 @@ export async function POST(req: NextRequest) {
       success: true,
       message: "Push notification subscription registered successfully!"
     });
-  } catch (err: any) {
-    return NextResponse.json(
-      { error: err.message || "Internal server error" },
-      { status: 500 }
-    );
+  } catch (err) {
+    console.error("Error registering push subscription:", err);
+    return NextResponse.json({ error: "Internal server error" }, { status: 500 });
   }
 }
 
 export async function DELETE(req: NextRequest) {
   try {
-    const { endpoint } = await req.json();
-    if (!endpoint) {
+    const body = await req.json().catch(() => null);
+    const endpoint: unknown = body && typeof body === "object" ? body.endpoint : undefined;
+    if (typeof endpoint !== "string" || !endpoint) {
       return NextResponse.json({ error: "Endpoint required" }, { status: 400 });
     }
 
-    removeSubscription(endpoint);
+    if (!(await removeSubscription(endpoint))) {
+      return NextResponse.json({ error: "Failed to remove subscription" }, { status: 500 });
+    }
     return NextResponse.json({ success: true, message: "Subscription removed" });
-  } catch (err: any) {
-    return NextResponse.json(
-      { error: err.message || "Internal server error" },
-      { status: 500 }
-    );
+  } catch (err) {
+    console.error("Error removing push subscription:", err);
+    return NextResponse.json({ error: "Internal server error" }, { status: 500 });
   }
 }

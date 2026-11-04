@@ -269,6 +269,10 @@ body {
 .input::placeholder { color: var(--text-muted); }
 .dark-mode .input { background: var(--bg-card); color: var(--text); }
 select.input { cursor: pointer; }
+/* Native dropdown lists (and scrollbars, date pickers) follow the theme; without this,
+   dark-mode <option>s render light text on the OS's white list background */
+body.dark-mode { color-scheme: dark; }
+.dark-mode select option { background: var(--bg-card); color: var(--text); }
 .input-group { position: relative; }
 .input-group .input { padding-left: 40px; }
 .input-group-icon { position: absolute; left: 13px; top: 50%; transform: translateY(-50%); color: var(--text-muted); font-size: 15px; pointer-events: none; }

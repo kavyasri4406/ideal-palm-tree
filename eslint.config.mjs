@@ -12,7 +12,23 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // Local scratch files (git-ignored)
+    "scratch/**",
   ]),
+  {
+    // Standalone Node scripts are CommonJS and run outside the Next.js bundle
+    files: ["**/*.cjs", "*.js", "scripts/**/*.js"],
+    rules: {
+      "@typescript-eslint/no-require-imports": "off",
+    },
+  },
+  {
+    // Service worker runs in the ServiceWorkerGlobalScope
+    files: ["public/sw.js"],
+    languageOptions: {
+      globals: { self: "readonly", clients: "readonly" },
+    },
+  },
 ]);
 
 export default eslintConfig;

@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { groqChat, parseJsonReply, type GroqMessage } from "@/lib/groq";
 
 const OCR_PROMPT_HEADER = `You are an expert universal optical character recognition (OCR) and document analysis AI for Indian farmers and users.
 Analyze whatever image or document file is provided.
@@ -42,10 +43,23 @@ Return ONLY a valid JSON object matching this exact structure (do NOT wrap in ma
   "actionItemsHI": ["कार्य 1", "कार्य 2", "कार्य 3", "कार्य 4"]
 }`;
 
-const GROQ_OCR_MODELS = [
-  "qwen/qwen3.8-27b",
-  "allam-2-7b"
-];
+// Vision-capable model for images; text-only models can additionally handle PDF text
+const GROQ_VISION_MODEL = process.env.GROQ_VISION_MODEL || "qwen/qwen3.8-27b";
+const GROQ_TEXT_MODELS = [process.env.GROQ_TEXT_MODEL || "qwen/qwen3.8-27b", "openai/gpt-oss-20b"];
+
+// Serverless hosts cap request bodies (~4.5 MB on Vercel); PDFs are reduced to extracted text
+const MAX_UPLOAD_BYTES = 4 * 1024 * 1024;
+// Groq accepts base64 images up to 4 MB, and base64 is ~33% larger than the raw file
+const MAX_IMAGE_BYTES = 3 * 1000 * 1000;
+
+// Seconds; vision OCR with a ~4k-token JSON reply is slow
+export const maxDuration = 60;
+
+type RawOcr = Record<string, unknown>;
+
+const str = (v: unknown): string | undefined => (typeof v === "string" && v.trim() ? v : undefined);
+const strList = (v: unknown): string[] | undefined =>
+  Array.isArray(v) && v.length > 0 && v.every(x => typeof x === "string") ? v : undefined;
 
 function extractTextFromFileBuffer(buffer: Buffer): string {
   try {
@@ -67,24 +81,16 @@ function extractTextFromFileBuffer(buffer: Buffer): string {
     });
 
     return textMatches.slice(0, 80).join(" ");
-  } catch (e) {
+  } catch {
     return "";
   }
 }
 
-function generateLanguageFallbacks(
-  docType: string,
-  title: string,
-  fileName: string,
-  whatIsThisEN: string,
-  howToUseEN: string,
-  summaryEN: string
-) {
-  const isInfographic =
-    fileName.toLowerCase().includes("infographic") ||
-    docType.toLowerCase().includes("infographic") ||
-    title.toLowerCase().includes("partner") ||
-    title.toLowerCase().includes("ai");
+function generateLanguageFallbacks(docType: string, title: string, fileName: string) {
+  // Special-case text for the "AI Agriculture Partner" infographic only. Match "AI" as a whole
+  // word so titles like "Grain Receipt" or "Domain" don't get the infographic description.
+  const haystack = `${fileName} ${docType} ${title}`.toLowerCase();
+  const isInfographic = /\bai\b/.test(haystack) && /partner|infographic/.test(haystack);
 
   let whatTA = `இந்த படம் "${fileName}" (${docType}) பற்றிய விரிவான தகவல்களைக் கொண்டுள்ளது.`;
   let whatTE = `ఈ చిత్రం "${fileName}" (${docType}) గురించిన వివరణాత్మక సమాచారాన్ని కలిగి ఉంది.`;
@@ -104,31 +110,31 @@ function generateLanguageFallbacks(
   let sumML = `വിശകലനം ചെയ്ത ചിത്രം "${fileName}". AI സിസ്റ്റങ്ങളും കാർഷിക തീരുമാനങ്ങളും ലഭിച്ചു.`;
   let sumHI = `विश्लेषित चित्र "${fileName}"। इसमें AI सिस्टम और कृषि निर्णय लेने की जानकारी शामिल है।`;
 
-  let actTA = [
+  const actTA = [
     "அதிகாரப்பூர்வ விவரங்களை கவனமாக மதிப்பாய்வு செய்யவும்.",
     "தகுந்த அதிகாரியிடம் சரிபார்க்கவும்.",
     "நகலை பாதுகாப்பாக வைத்திருக்கவும்.",
     "உள்ளூர் மையத்தை தொடர்பு கொள்ளவும்."
   ];
-  let actTE = [
+  const actTE = [
     "అధికారిక వివరాలను జాగ్రత్తగా పరిశీలించండి.",
     "సంబంధిత అధికారితో ధృవీకరించుకోండి.",
     "ప్రతిని సురక్షితంగా ఉంచుకోండి.",
     "స్థానిక కేంద్రాన్ని సంప్రదించండి."
   ];
-  let actKN = [
+  const actKN = [
     "ಅಧಿಕೃತ ವಿವರಗಳನ್ನು ಎಚ್ಚರಿಕೆಯಿಂದ ಪರಿಶೀಲಿಸಿ.",
     "ಸಂಬಂಧಿತ ಅಧಿಕಾರಿಯೊಂದಿಗೆ ಪರಿಶೀಲಿಸಿ.",
     "ಪ್ರತಿಯನ್ನು ಸುರಕ್ಷಿತವಾಗಿರಿಸಿ.",
     "ಸ್ಥಾನಿಕ ಕೇಂದ್ರವನ್ನು ಸಂಪರ್ಕಿಸಿ."
   ];
-  let actML = [
+  const actML = [
     "ഔദ്യോഗിക വിവരങ്ങൾ ശ്രദ്ധാപൂർവ്വം പരിശോധിക്കുക.",
     "ബന്ധപ്പെട്ട ഉദ്യോഗസ്ഥനുമായി സ്ഥിരീകരിക്കുക.",
     "പകർപ്പ് സുരക്ഷിതമായി സൂക്ഷിക്കുക.",
     "പ്രാദേശിക കേന്ദ്രവുമായി ബന്ധപ്പെടുക."
   ];
-  let actHI = [
+  const actHI = [
     "आधिकारिक विवरणों की ध्यानपूर्वक समीक्षा करें।",
     "संबंधित अधिकारी से सत्यापन करें।",
     "प्रति सुरक्षित रखें।",
@@ -179,43 +185,44 @@ function generateLanguageFallbacks(
   };
 }
 
-function normalizeOcrResult(raw: any, fileName: string) {
-  if (!raw) return null;
-  const docType = raw.documentType || raw.document_type || "Analyzed Document";
-  const title = raw.extractedTitle || raw.title || raw.document_title || fileName.replace(/\.[^/.]+$/, "");
-  const date = raw.extractedDate || raw.date || new Date().toLocaleDateString("en-IN");
-  const issuer = raw.issuerAuthority || raw.issuer || (raw.issuing_authority?.name ? `${raw.issuing_authority.name}` : "Document Issuing Entity");
+function normalizeOcrResult(raw: RawOcr, fileName: string) {
+  const issuingAuthority = raw.issuing_authority as { name?: unknown } | undefined;
+  const summary = raw.summary as { text?: unknown } | string | undefined;
+  const docType = str(raw.documentType) || str(raw.document_type) || "Analyzed Document";
+  const title = str(raw.extractedTitle) || str(raw.title) || str(raw.document_title) || fileName.replace(/\.[^/.]+$/, "");
+  const date = str(raw.extractedDate) || str(raw.date) || new Date().toLocaleDateString("en-IN");
+  const issuer = str(raw.issuerAuthority) || str(raw.issuer) || str(issuingAuthority?.name) || "Document Issuing Entity";
 
-  const whatIsThisEN = raw.whatIsThisEN || raw.whatIsThis || `This image/file "${fileName}" is an analyzed ${docType}.`;
-  const howToUseEN = raw.howToUseEN || raw.howToUse || `Review the extracted details carefully for your official records and farm planning.`;
-  const sumEN = raw.summaryEN || (typeof raw.summary === "string" ? raw.summary : raw.summary?.text) || whatIsThisEN;
+  const whatIsThisEN = str(raw.whatIsThisEN) || str(raw.whatIsThis) || `This image/file "${fileName}" is an analyzed ${docType}.`;
+  const howToUseEN = str(raw.howToUseEN) || str(raw.howToUse) || `Review the extracted details carefully for your official records and farm planning.`;
+  const sumEN = str(raw.summaryEN) || str(summary) || (typeof summary === "object" ? str(summary?.text) : undefined) || whatIsThisEN;
 
-  const fallbacks = generateLanguageFallbacks(docType, title, fileName, whatIsThisEN, howToUseEN, sumEN);
+  const fallbacks = generateLanguageFallbacks(docType, title, fileName);
 
-  const whatIsThisTA = raw.whatIsThisTA || fallbacks.whatTA;
-  const whatIsThisTE = raw.whatIsThisTE || fallbacks.whatTE;
-  const whatIsThisKN = raw.whatIsThisKN || fallbacks.whatKN;
-  const whatIsThisML = raw.whatIsThisML || fallbacks.whatML;
-  const whatIsThisHI = raw.whatIsThisHI || fallbacks.whatHI;
+  const whatIsThisTA = str(raw.whatIsThisTA) || fallbacks.whatTA;
+  const whatIsThisTE = str(raw.whatIsThisTE) || fallbacks.whatTE;
+  const whatIsThisKN = str(raw.whatIsThisKN) || fallbacks.whatKN;
+  const whatIsThisML = str(raw.whatIsThisML) || fallbacks.whatML;
+  const whatIsThisHI = str(raw.whatIsThisHI) || fallbacks.whatHI;
 
-  const howToUseTA = raw.howToUseTA || fallbacks.howTA;
-  const howToUseTE = raw.howToUseTE || fallbacks.howTE;
-  const howToUseKN = raw.howToUseKN || fallbacks.howKN;
-  const howToUseML = raw.howToUseML || fallbacks.howML;
-  const howToUseHI = raw.howToUseHI || fallbacks.howHI;
+  const howToUseTA = str(raw.howToUseTA) || fallbacks.howTA;
+  const howToUseTE = str(raw.howToUseTE) || fallbacks.howTE;
+  const howToUseKN = str(raw.howToUseKN) || fallbacks.howKN;
+  const howToUseML = str(raw.howToUseML) || fallbacks.howML;
+  const howToUseHI = str(raw.howToUseHI) || fallbacks.howHI;
 
-  const sumTA = (raw.summaryTA && !raw.summaryTA.includes(sumEN)) ? raw.summaryTA : fallbacks.sumTA;
-  const sumTE = (raw.summaryTE && !raw.summaryTE.includes(sumEN)) ? raw.summaryTE : fallbacks.sumTE;
-  const sumKN = (raw.summaryKN && !raw.summaryKN.includes(sumEN)) ? raw.summaryKN : fallbacks.sumKN;
-  const sumML = (raw.summaryML && !raw.summaryML.includes(sumEN)) ? raw.summaryML : fallbacks.sumML;
-  const sumHI = (raw.summaryHI && !raw.summaryHI.includes(sumEN)) ? raw.summaryHI : fallbacks.sumHI;
+  const sumTA = (str(raw.summaryTA) && !str(raw.summaryTA)!.includes(sumEN)) ? str(raw.summaryTA)! : fallbacks.sumTA;
+  const sumTE = (str(raw.summaryTE) && !str(raw.summaryTE)!.includes(sumEN)) ? str(raw.summaryTE)! : fallbacks.sumTE;
+  const sumKN = (str(raw.summaryKN) && !str(raw.summaryKN)!.includes(sumEN)) ? str(raw.summaryKN)! : fallbacks.sumKN;
+  const sumML = (str(raw.summaryML) && !str(raw.summaryML)!.includes(sumEN)) ? str(raw.summaryML)! : fallbacks.sumML;
+  const sumHI = (str(raw.summaryHI) && !str(raw.summaryHI)!.includes(sumEN)) ? str(raw.summaryHI)! : fallbacks.sumHI;
 
-  const actionItemsEN = raw.actionItemsEN || raw.action_items || raw.actionItems || ["Review official details carefully.", "Verify key information.", "Keep copy safe.", "Contact support if needed."];
-  const actionItemsTA = raw.actionItemsTA || fallbacks.actTA;
-  const actionItemsTE = raw.actionItemsTE || fallbacks.actTE;
-  const actionItemsKN = raw.actionItemsKN || fallbacks.actKN;
-  const actionItemsML = raw.actionItemsML || fallbacks.actML;
-  const actionItemsHI = raw.actionItemsHI || fallbacks.actHI;
+  const actionItemsEN = strList(raw.actionItemsEN) || strList(raw.action_items) || strList(raw.actionItems) || ["Review official details carefully.", "Verify key information.", "Keep copy safe.", "Contact support if needed."];
+  const actionItemsTA = strList(raw.actionItemsTA) || fallbacks.actTA;
+  const actionItemsTE = strList(raw.actionItemsTE) || fallbacks.actTE;
+  const actionItemsKN = strList(raw.actionItemsKN) || fallbacks.actKN;
+  const actionItemsML = strList(raw.actionItemsML) || fallbacks.actML;
+  const actionItemsHI = strList(raw.actionItemsHI) || fallbacks.actHI;
 
   return {
     documentType: docType,
@@ -249,97 +256,54 @@ function normalizeOcrResult(raw: any, fileName: string) {
   };
 }
 
-function parseJSONSafely(text: string) {
-  let cleaned = text.replace(/```json\n?/g, "").replace(/```\n?/g, "").trim();
-  try {
-    return JSON.parse(cleaned);
-  } catch (err) {
-    let fixed = cleaned;
-    const quoteCount = (fixed.match(/(?<!\\)"/g) || []).length;
-    if (quoteCount % 2 !== 0) fixed += '"';
-    const openBrackets = (fixed.match(/\[/g) || []).length - (fixed.match(/\]/g) || []).length;
-    for (let i = 0; i < Math.max(0, openBrackets); i++) fixed += "]";
-    const openBraces = (fixed.match(/\{/g) || []).length - (fixed.match(/\}/g) || []).length;
-    for (let i = 0; i < Math.max(0, openBraces); i++) fixed += "}";
-    try {
-      return JSON.parse(fixed);
-    } catch {
-      return null;
-    }
+async function callGroqOCR(promptText: string, imageBase64?: string, mimeType?: string) {
+  const text = `${OCR_PROMPT_HEADER}\n\n${promptText}`;
+  let content: GroqMessage["content"] = text;
+  if (imageBase64) {
+    const finalMime = mimeType === "image/jpg" ? "image/jpeg" : mimeType || "image/png";
+    content = [
+      { type: "text", text },
+      { type: "image_url", image_url: { url: `data:${finalMime};base64,${imageBase64}` } }
+    ];
   }
-}
 
-async function callGroqVisionOCR(promptText: string, imageBase64?: string, mimeType?: string) {
-  const groqApiKey = process.env.GROQ_API_KEY;
-  if (!groqApiKey) return null;
-
-  for (const modelName of GROQ_OCR_MODELS) {
-    try {
-      const messages: any[] = [];
-      const userContent: any[] = [
-        {
-          type: "text",
-          text: `${OCR_PROMPT_HEADER}\n\n${promptText}`
-        }
-      ];
-
-      if (imageBase64) {
-        let finalMime = mimeType || "image/png";
-        if (finalMime === "image/jpg") finalMime = "image/jpeg";
-        userContent.push({
-          type: "image_url",
-          image_url: {
-            url: `data:${finalMime};base64,${imageBase64}`
-          }
-        });
-      }
-
-      messages.push({
-        role: "user",
-        content: userContent
-      });
-
-      const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "Authorization": `Bearer ${groqApiKey}`,
-          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AgriPredict/1.0"
-        },
-        body: JSON.stringify({
-          model: modelName,
-          messages,
-          temperature: 0.1,
-          max_tokens: 850
-        })
-      });
-
-      if (response.ok) {
-        const data = await response.json();
-        const text = data.choices?.[0]?.message?.content;
-        if (text) {
-          const parsed = parseJSONSafely(text);
-          if (parsed) {
-            return { parsed, modelName };
-          }
-        }
-      }
-    } catch (e) {
-      console.warn(`Groq Vision OCR failed for model ${modelName}:`, e);
+  // Stay inside the function's maxDuration so the fallback result can still be returned
+  const deadline = Date.now() + (maxDuration - 5) * 1000;
+  // The reply carries 6 languages and needs ~4k tokens; a lower limit truncates the JSON
+  const models = imageBase64 ? [GROQ_VISION_MODEL] : GROQ_TEXT_MODELS;
+  for (const [i, modelName] of models.entries()) {
+    const remainingMs = deadline - Date.now();
+    if (remainingMs < 5000) break;
+    // Leave time for the next model if this one hangs
+    const isLast = i === models.length - 1;
+    const result = await groqChat({
+      model: modelName,
+      messages: [{ role: "user", content }],
+      temperature: 0.1,
+      maxTokens: 6000,
+      json: true,
+      timeoutMs: isLast ? remainingMs : Math.min(remainingMs, 35000)
+    });
+    if (result.ok) {
+      const parsed = parseJsonReply(result.content);
+      if (parsed) return { parsed, modelName };
+      console.warn(`Groq OCR returned unparseable JSON from ${modelName} (finish: ${result.finishReason})`);
+    } else {
+      console.warn(`Groq OCR failed for model ${modelName} (status ${result.status}): ${result.error}`);
     }
   }
   return null;
 }
 
-function generateSmartDynamicResult(fileName: string, mimeType?: string) {
+function generateSmartDynamicResult(fileName: string) {
   const nameClean = (fileName || "uploaded_scan").replace(/\.[^/.]+$/, "").replace(/[_-]/g, " ").trim();
   const titleFormatted = nameClean.replace(/\b\w/g, (c) => c.toUpperCase());
   const today = new Date().toLocaleDateString("en-IN", { day: "2-digit", month: "long", year: "numeric" });
 
-  let docType = "Agricultural Document / File";
-  let whatIsThisEN = `This image/file "${fileName}" is an analyzed document for agricultural and farm records.`;
-  let howToUseEN = `Review the extracted details, terms, and guidelines carefully for your farm planning or official verification.`;
-  let sumEN = `Analyzed document/image "${fileName}". Extracted structural layout, concepts, and key parameters.`;
+  const docType = "Agricultural Document / File";
+  const whatIsThisEN = `AI analysis is unavailable right now, so the contents of "${fileName}" could not be read.`;
+  const howToUseEN = `Please try scanning again in a few minutes, or show the document at your nearest Krishi Vigyan Kendra or agriculture office.`;
+  const sumEN = `No text was extracted from "${fileName}" because the AI scanner could not be reached.`;
 
   return normalizeOcrResult(
     {
@@ -365,10 +329,12 @@ export async function POST(req: NextRequest) {
     const contentType = req.headers.get("content-type") || "";
 
     if (contentType.includes("application/json")) {
-      const { demoKey, fileName, prompt } = await req.json();
-      const promptText = prompt || `Analyze document: ${demoKey || fileName || "Document"}. Provide JSON in EN, TA, TE, KN, ML, HI.`;
+      const body = ((await req.json().catch(() => null)) ?? {}) as Record<string, unknown>;
+      const demoKey = str(body.demoKey)?.slice(0, 120);
+      const fileName = str(body.fileName)?.slice(0, 200);
+      const promptText = `Analyze document: ${demoKey || fileName || "Document"}. Provide JSON in EN, TA, TE, KN, ML, HI.`;
 
-      const visionResult = await callGroqVisionOCR(promptText);
+      const visionResult = await callGroqOCR(promptText);
       if (visionResult && visionResult.parsed) {
         const normalized = normalizeOcrResult(visionResult.parsed, fileName || "document.pdf");
         return NextResponse.json({ result: normalized, mode: `⚡ Groq Vision AI (${visionResult.modelName})` });
@@ -380,10 +346,18 @@ export async function POST(req: NextRequest) {
 
     if (contentType.includes("multipart/form-data")) {
       const formData = await req.formData();
-      const file = formData.get("file") as File | null;
+      const file = formData.get("file");
 
-      if (file) {
-        const fileName = file.name;
+      if (file instanceof File) {
+        const fileName = (file.name || "uploaded_document").slice(0, 200);
+        const isPdfUpload = fileName.toLowerCase().endsWith(".pdf") || file.type.includes("pdf");
+        const limit = isPdfUpload ? MAX_UPLOAD_BYTES : MAX_IMAGE_BYTES;
+        if (file.size > limit) {
+          return NextResponse.json(
+            { error: `File is too large (${(file.size / 1024 / 1024).toFixed(1)} MB). Please upload ${isPdfUpload ? "a PDF under 4 MB" : "an image under 3 MB"}.` },
+            { status: 413 }
+          );
+        }
         const lowerName = fileName.toLowerCase();
         let fileMime = file.type || "image/png";
 
@@ -409,7 +383,7 @@ export async function POST(req: NextRequest) {
 
         const isPdf = fileMime === "application/pdf" || lowerName.endsWith(".pdf");
         // For images pass base64 directly to Groq Vision; for PDF pass extracted text
-        const visionResult = await callGroqVisionOCR(
+        const visionResult = await callGroqOCR(
           promptText,
           isPdf ? undefined : base64,
           isPdf ? undefined : fileMime
@@ -420,7 +394,7 @@ export async function POST(req: NextRequest) {
           return NextResponse.json({ result: normalized, mode: `⚡ Groq Vision AI (${visionResult.modelName})` });
         }
 
-        const fallback = generateSmartDynamicResult(fileName, fileMime);
+        const fallback = generateSmartDynamicResult(fileName);
         return NextResponse.json({ result: fallback, mode: "dynamic-smart-ocr" });
       }
     }
@@ -428,6 +402,7 @@ export async function POST(req: NextRequest) {
     const fallback = generateSmartDynamicResult("uploaded_document.pdf");
     return NextResponse.json({ result: fallback, mode: "dynamic-smart-ocr" });
   } catch (err) {
+    console.warn("OCR request failed:", err);
     const fallback = generateSmartDynamicResult("uploaded_document.pdf");
     return NextResponse.json({ result: fallback, mode: "dynamic-smart-ocr" });
   }

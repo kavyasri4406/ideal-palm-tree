@@ -1,10 +1,11 @@
 "use client";
 import { createContext, useContext, useState, useEffect, useCallback, ReactNode, useRef } from "react";
-import { STATE_DISTRICTS } from "@/lib/locationData";
+import { STATE_DISTRICTS, type District } from "@/lib/locationData";
 import { getPriceAlerts, updateAlertTriggered, dispatchPriceNotification } from "@/lib/priceAlerts";
 import { CROPS, getLivePrice } from "@/lib/cropData";
 
 export type Language = "en" | "ta" | "te" | "kn" | "ml" | "hi";
+const SUPPORTED_LANGUAGES: Language[] = ["en", "ta", "te", "kn", "ml", "hi"];
 
 export interface Notification {
   id: string;
@@ -26,7 +27,7 @@ interface AppContextType {
   isDark: boolean;
   toggleDark: () => void;
   notifications: Notification[];
-  toast: { id: string; title: string; message: string; type: string } | null;
+  toast: Toast | null;
   addNotification: (n: Omit<Notification, "id" | "time" | "read">) => void;
   markAllRead: () => void;
   markAsRead: (id: string) => void;
@@ -49,20 +50,29 @@ const DEFAULT_LOCATION: LocationInfo = {
   lon: 78.1198,
 };
 
-const INITIAL_NOTIFICATIONS: Omit<Notification, "id">[] = [];
+type Toast = { id: string; title: string; message: string; type: string };
+
+function nearestDistrict(districts: District[], lat: number, lon: number): District {
+  const dist = (d: District) => (d.lat - lat) ** 2 + (d.lon - lon) ** 2;
+  return districts.reduce((best, d) => (dist(d) < dist(best) ? d : best));
+}
 
 export function AppProvider({ children }: { children: ReactNode }) {
   const [isDark, setIsDark] = useState(false);
   const [notifications, setNotifications] = useState<Notification[]>([]);
-  const [location, setLocationState] = useState<LocationInfo>({
-    state: "Tamil Nadu",
-    district: "Madurai",
-    lat: 9.9252,
-    lon: 78.1198
-  });
+  const [location, setLocationState] = useState<LocationInfo>(DEFAULT_LOCATION);
   const [language, setLanguageState] = useState<Language>("en");
   const [hasLoaded, setHasLoaded] = useState(false);
   const [isLocating, setIsLocating] = useState(false);
+  const [toast, setToast] = useState<Toast | null>(null);
+  const lastTriggeredTimeRef = useRef<Record<string, number>>({});
+
+  const showToast = useCallback((t: Toast) => {
+    setToast(t);
+    setTimeout(() => {
+      setToast(current => current?.id === t.id ? null : current);
+    }, 4000);
+  }, []);
 
   const detectLiveLocation = async (): Promise<void> => {
     if (!navigator.geolocation) {
@@ -76,29 +86,25 @@ export function AppProvider({ children }: { children: ReactNode }) {
         try {
           // Free reverse geocoding API
           const res = await fetch(`https://api.bigdatacloud.net/data/reverse-geocode-client?latitude=${latitude}&longitude=${longitude}&localityLanguage=en`);
+          if (!res.ok) throw new Error(`Reverse geocoding failed (${res.status})`);
           const data = await res.json();
-          
-          const stateName = data.principalSubdivision || "Tamil Nadu";
-          const districtName = data.city || data.locality || data.localityInfo?.administrative?.[2]?.name || "Chennai";
 
-          // Try matching with STATE_DISTRICTS
-          let matchedState = Object.keys(STATE_DISTRICTS).find(
-            s => s.toLowerCase().includes(stateName.toLowerCase()) || stateName.toLowerCase().includes(s.toLowerCase())
-          ) || "Tamil Nadu";
+          const stateName: string = (data.principalSubdivision || "").toLowerCase();
+          const districtName: string = (data.city || data.locality || data.localityInfo?.administrative?.[2]?.name || "").toLowerCase();
 
-          let districts = STATE_DISTRICTS[matchedState] || STATE_DISTRICTS["Tamil Nadu"];
-          let matchedDist = districts.find(
-            d => d.name.toLowerCase().includes(districtName.toLowerCase()) || districtName.toLowerCase().includes(d.name.toLowerCase())
-          ) || districts[0];
+          // Match the geocoded state by name; otherwise use the state of the nearest known district
+          const nearestAnywhere = nearestDistrict(Object.values(STATE_DISTRICTS).flat(), latitude, longitude);
+          const matchedState = (stateName && Object.keys(STATE_DISTRICTS).find(
+            s => s.toLowerCase().includes(stateName) || stateName.includes(s.toLowerCase())
+          )) || Object.keys(STATE_DISTRICTS).find(s => STATE_DISTRICTS[s].includes(nearestAnywhere)) || DEFAULT_LOCATION.state;
 
-                  const rawText = (JSON.stringify(data) + " " + stateName + " " + districtName).toLowerCase();
-          // Map Krishnankovil / Madurai / ISP default to Madurai, Tamil Nadu
-          if (rawText.includes("krishnankovil") || rawText.includes("madurai") || matchedDist.name === "Chennai") {
-            matchedState = "Tamil Nadu";
-            matchedDist = { name: "Madurai", lat: 9.9252, lon: 78.1198 };
-          }
+          // Match the district by name; otherwise use the geographically nearest district
+          const districts = STATE_DISTRICTS[matchedState];
+          const matchedDist = (districtName && districts.find(
+            d => d.name.toLowerCase().includes(districtName) || districtName.includes(d.name.toLowerCase())
+          )) || nearestDistrict(districts, latitude, longitude);
 
-        const newLoc = {
+          const newLoc = {
             state: matchedState,
             district: matchedDist.name,
             lat: latitude,
@@ -109,7 +115,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
           localStorage.setItem("agri_state", matchedState);
           localStorage.setItem("agri_district", matchedDist.name);
 
-          setToast({
+          showToast({
             id: String(Date.now()),
             title: "📍 Live Location Detected!",
             message: `Set to ${matchedDist.name}, ${matchedState}`,
@@ -117,7 +123,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
           });
         } catch (err) {
           console.error("Geocoding error:", err);
-          setToast({
+          showToast({
             id: String(Date.now()),
             title: "📍 Location Coordinates Saved",
             message: `Lat: ${latitude.toFixed(2)}, Lon: ${longitude.toFixed(2)}`,
@@ -127,7 +133,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
           setIsLocating(false);
         }
       },
-      (error) => {
+      () => {
         setIsLocating(false);
         alert("Unable to retrieve location. Please grant location permissions in your browser.");
       },
@@ -135,12 +141,14 @@ export function AppProvider({ children }: { children: ReactNode }) {
     );
   };
 
+  // Restore saved preferences after mount: this provider is server-rendered, so reading
+  // localStorage during render would cause a hydration mismatch.
+  /* eslint-disable react-hooks/set-state-in-effect */
   useEffect(() => {
-    if (typeof window === "undefined") return;
     const dark = localStorage.getItem("agri_dark") === "true";
     if (dark) { setIsDark(true); document.body.classList.add("dark-mode"); }
-    const lang = localStorage.getItem("agri_lang") as Language;
-    if (lang) setLanguageState(lang);
+    const lang = localStorage.getItem("agri_lang");
+    if (lang && SUPPORTED_LANGUAGES.includes(lang as Language)) setLanguageState(lang as Language);
     
     const storedState = localStorage.getItem("agri_state");
     const storedDistrict = localStorage.getItem("agri_district");
@@ -166,7 +174,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       if (storedNotif) {
         try {
           const parsed = JSON.parse(storedNotif);
-          const parsedWithDates = parsed.map((n: any) => ({
+          const parsedWithDates = parsed.map((n: Notification) => ({
             ...n,
             time: new Date(n.time)
           }));
@@ -178,6 +186,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     }
     setHasLoaded(true);
   }, []);
+  /* eslint-enable react-hooks/set-state-in-effect */
 
   useEffect(() => {
     if (hasLoaded && typeof window !== "undefined") {
@@ -192,12 +201,14 @@ export function AppProvider({ children }: { children: ReactNode }) {
     localStorage.setItem("agri_dark", String(next));
   };
 
-  const [toast, setToast] = useState<{ id: string; title: string; message: string; type: string } | null>(null);
-  const lastTriggeredTimeRef = useRef<Record<string, number>>({});
+  // Screen readers and the browser's speech engine pick a voice from <html lang>
+  useEffect(() => {
+    document.documentElement.lang = language;
+  }, [language]);
 
   const addNotification = useCallback((n: Omit<Notification, "id" | "time" | "read">) => {
     const now = Date.now();
-    const alertKey = `${n.type}_${n.title}`;
+    const alertKey = `${n.type}_${n.title}_${n.message}`;
     const lastTime = lastTriggeredTimeRef.current[alertKey] || 0;
     
     // Cooldown of 1 minute per unique alert to prevent repeating spam
@@ -209,12 +220,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
     lastTriggeredTimeRef.current[alertKey] = now;
     const id = `n_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
     setNotifications(prev => [{ ...n, id, time: new Date(), read: false }, ...prev].slice(0, 25));
-    setToast({ id, title: n.title, message: n.message, type: n.type });
-    
-    setTimeout(() => {
-      setToast(current => current?.id === id ? null : current);
-    }, 4000);
-  }, []);
+    showToast({ id, title: n.title, message: n.message, type: n.type });
+  }, [showToast]);
 
   // Background monitor for Mandi Price Threshold Alerts
   useEffect(() => {

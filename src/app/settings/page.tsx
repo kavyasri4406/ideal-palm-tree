@@ -1,13 +1,46 @@
 "use client";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { useApp, type Language } from "@/lib/AppContext";
-import { getCurrentUser, updateUserLocation, updatePortfolio, updateUserProfile, updateFarmProfile, type User } from "@/lib/auth";
+import { getCurrentUser, updateUserLocation, updateUserProfile, updateFarmProfile } from "@/lib/auth";
 import { INDIAN_STATES, STATE_DISTRICTS } from "@/lib/locationData";
-import { CROPS } from "@/lib/cropData";
+import { tr, type Localized } from "@/lib/i18n";
 
 const AVATARS = ["🌾", "🌱", "🚜", "🌻", "🥕", "🌿", "🍃", "🫘"];
+// Accessible names for the emoji-only avatar picker buttons.
+const AVATAR_NAMES: Record<string, Localized> = {
+  "🌾": { en: "Sheaf of rice", ta: "நெற்கதிர்", te: "వరి కంకి", kn: "ಭತ್ತದ ತೆನೆ", ml: "നെൽക്കതിർ", hi: "धान की बाली" },
+  "🌱": { en: "Seedling", ta: "நாற்று", te: "మొలక", kn: "ಸಸಿ", ml: "തൈ", hi: "पौधा" },
+  "🚜": { en: "Tractor", ta: "டிராக்டர்", te: "ట్రాక్టర్", kn: "ಟ್ರ್ಯಾಕ್ಟರ್", ml: "ട്രാക്ടർ", hi: "ट्रैक्टर" },
+  "🌻": { en: "Sunflower", ta: "சூரியகாந்தி", te: "పొద్దుతిరుగుడు", kn: "ಸೂರ್ಯಕಾಂತಿ", ml: "സൂര്യകാന്തി", hi: "सूरजमुखी" },
+  "🥕": { en: "Carrot", ta: "கேரட்", te: "క్యారెట్", kn: "ಗಜ್ಜರಿ", ml: "കാരറ്റ്", hi: "गाजर" },
+  "🌿": { en: "Herb", ta: "மூலிகை", te: "మూలిక", kn: "ಗಿಡಮೂಲಿಕೆ", ml: "ഔഷധസസ്യം", hi: "जड़ी-बूटी" },
+  "🍃": { en: "Leaves", ta: "இலைகள்", te: "ఆకులు", kn: "ಎಲೆಗಳು", ml: "ഇലകൾ", hi: "पत्तियां" },
+  "🫘": { en: "Beans", ta: "பீன்ஸ்", te: "బీన్స్", kn: "ಬೀನ್ಸ್", ml: "ബീൻസ്", hi: "बीन्स" },
+};
 const ROLES = ["Farmer", "Trader", "Agronomist", "Student", "Guest"];
+const ROLE_NAMES: Record<string, Localized> = {
+  Farmer: { en: "Farmer", ta: "விவசாயி", te: "రైతు", kn: "ರೈತ", ml: "കർഷകൻ", hi: "किसान" },
+  Trader: { en: "Trader", ta: "வியாபாரி", te: "వ్యాపారి", kn: "ವ್ಯಾಪಾರಿ", ml: "വ്യാപാരി", hi: "व्यापारी" },
+  Agronomist: { en: "Agronomist", ta: "வேளாண் நிபுணர்", te: "వ్యవసాయ నిపుణుడు", kn: "ಕೃಷಿ ತಜ್ಞ", ml: "കാർഷിക വിദഗ്ധൻ", hi: "कृषि विशेषज्ञ" },
+  Student: { en: "Student", ta: "மாணவர்", te: "విద్యార్థి", kn: "ವಿದ್ಯಾರ್ಥಿ", ml: "വിദ്യാർത്ഥി", hi: "छात्र" },
+  Guest: { en: "Guest", ta: "விருந்தினர்", te: "అతిథి", kn: "ಅತಿಥಿ", ml: "അതിഥി", hi: "अतिथि" },
+};
+const SOIL_OPTIONS: { value: string; label: Localized }[] = [
+  { value: "Red Loamy", label: { en: "Red Loamy Soil", ta: "செம்மண் (வண்டல் கலந்தது)", te: "ఎర్ర లోమీ నేల", kn: "ಕೆಂಪು ಗೋಡು ಮಣ್ಣು", ml: "ചുവന്ന പശിമരാശി മണ്ണ്", hi: "लाल दोमट मिट्टी" } },
+  { value: "Black Cotton", label: { en: "Black Cotton Soil", ta: "கரிசல் மண்", te: "నల్లరేగడి నేల", kn: "ಕಪ್ಪು ಹತ್ತಿ ಮಣ್ಣು", ml: "കറുത്ത പരുത്തി മണ്ണ്", hi: "काली कपास मिट्टी" } },
+  { value: "Alluvial", label: { en: "Alluvial Soil", ta: "வண்டல் மண்", te: "ఒండ్రు నేల", kn: "ಮೆಕ್ಕಲು ಮಣ್ಣು", ml: "എക്കൽ മണ്ണ്", hi: "जलोढ़ मिट्टी" } },
+  { value: "Clay Loam", label: { en: "Clay Loam Soil", ta: "களிமண் கலந்த மண்", te: "బంకమట్టి లోమీ నేల", kn: "ಜೇಡಿ ಗೋಡು ಮಣ್ಣು", ml: "കളിമൺ പശിമരാശി മണ്ണ്", hi: "चिकनी दोमट मिट्टी" } },
+  { value: "Sandy Loam", label: { en: "Sandy Loam Soil", ta: "மணல் கலந்த மண்", te: "ఇసుక లోమీ నేల", kn: "ಮರಳು ಗೋಡು ಮಣ್ಣು", ml: "മണൽ പശിമരാശി മണ്ണ്", hi: "बलुई दोमट मिट्टी" } },
+];
+const IRRIGATION_OPTIONS: { value: string; label: Localized }[] = [
+  { value: "Drip Irrigation", label: { en: "Drip Irrigation", ta: "சொட்டு நீர் பாசனம்", te: "బిందు సేద్యం", kn: "ಹನಿ ನೀರಾವರಿ", ml: "തുള്ളിനന", hi: "ड्रिप सिंचाई" } },
+  { value: "Canal Irrigation", label: { en: "Canal Irrigation", ta: "கால்வாய் பாசனம்", te: "కాలువ నీటిపారుదల", kn: "ಕಾಲುವೆ ನೀರಾವರಿ", ml: "കനാൽ ജലസേചനം", hi: "नहर सिंचाई" } },
+  { value: "Borewell / Pump", label: { en: "Borewell / Submersible Pump", ta: "ஆழ்துளைக் கிணறு / மோட்டார்", te: "బోరుబావి / సబ్‌మెర్సిబుల్ పంపు", kn: "ಕೊಳವೆಬಾವಿ / ಸಬ್‌ಮರ್ಸಿಬಲ್ ಪಂಪ್", ml: "കുഴൽക്കിണർ / സബ്മേഴ്സിബിൾ പമ്പ്", hi: "बोरवेल / सबमर्सिबल पंप" } },
+  { value: "Rainfed", label: { en: "Rainfed / Monsoon", ta: "மானாவாரி / பருவமழை", te: "వర్షాధారం / రుతుపవనాలు", kn: "ಮಳೆಯಾಶ್ರಿತ / ಮುಂಗಾರು", ml: "മഴയെ ആശ്രയിച്ച് / മൺസൂൺ", hi: "वर्षा आधारित / मानसून" } },
+  { value: "Sprinkler", label: { en: "Sprinkler Irrigation", ta: "தெளிப்பு நீர் பாசனம்", te: "స్ప్రింక్లర్ సేద్యం", kn: "ತುಂತುರು ನೀರಾವರಿ", ml: "സ്പ്രിങ്ക്ലർ ജലസേചനം", hi: "स्प्रिंकलर सिंचाई" } },
+];
+const ROLE_ICONS: Record<string, string> = { Farmer: "👨‍🌾", Trader: "💼", Agronomist: "🔬", Student: "🎓", Guest: "👤" };
 
 const LABELS = {
   en: {
@@ -106,9 +139,9 @@ const LABELS = {
     themeLabel: "ഡാർക്ക് മോഡ്",
     langLabel: "ആപ്പ് ഭാഷ",
     saveBtn: "ക്രമീകരണങ്ങൾ സംരക്ഷിക്കുക",
-    successMsg: "ക്രമീകരണങ്ങൾ വിജയം! 🟢",
-    notLoggedIn: "ലോഗിൻ ചെയ്യുക",
-    signInBtn: "ലോഗിൻ",
+    successMsg: "ക്രമീകരണങ്ങൾ വിജയകരമായി സംരക്ഷിച്ചു! 🟢",
+    notLoggedIn: "ക്രമീകരണങ്ങൾ കാണാൻ ദയവായി സൈൻ ഇൻ ചെയ്യുക",
+    signInBtn: "സൈൻ ഇൻ ചെയ്യുക",
   },
   hi: {
     title: "खाता सेटिंग्स",
@@ -135,44 +168,34 @@ const LABELS = {
 export default function SettingsPage() {
   const router = useRouter();
   const { isDark, toggleDark, location, setLocation, language, setLanguage } = useApp();
-  const [user, setUser] = useState<User | null>(null);
+  // This page only renders on the client (ClientLayout mounts children after hydration), so the
+  // stored user can be read once on mount. Profile fields are seeded from it and never reset by
+  // later location changes, so unsaved edits survive a State/District change.
+  const [user] = useState(getCurrentUser);
 
   // Form states
-  const [name, setName] = useState("");
-  const [role, setRole] = useState("Farmer");
-  const [selectedAvatar, setSelectedAvatar] = useState("🌾");
-  const [selectedState, setSelectedState] = useState("");
-  const [selectedDistrict, setSelectedDistrict] = useState("");
+  const [name, setName] = useState(user?.name ?? "");
+  const [role, setRole] = useState(user?.role || "Farmer");
+  const [selectedAvatar, setSelectedAvatar] = useState(user?.avatar || "🌾");
+  // State/District mirror the app location (every change below goes through setLocation, and
+  // live-location detection updates it too), so derive them instead of copying into state.
+  const selectedState = location.state;
+  const selectedDistrict = location.district;
   const [showSuccess, setShowSuccess] = useState(false);
-  // Farm Profile states
-  const [landSize, setLandSize] = useState<number>(3);
-  const [soilType, setSoilType] = useState<string>("Red Loamy");
-  const [irrigationType, setIrrigationType] = useState<string>("Drip Irrigation");
+  // Farm Profile states (land size kept as the raw input string so the field can be cleared/edited freely)
+  const [landSize, setLandSize] = useState<string>(String(user?.farmProfile?.landSize || 3));
+  const [soilType, setSoilType] = useState<string>(user?.farmProfile?.soilType || "Red Loamy");
+  const [irrigationType, setIrrigationType] = useState<string>(user?.farmProfile?.irrigationType || "Drip Irrigation");
 
-
-  useEffect(() => {
-    const current = getCurrentUser();
-    if (current) {
-      setUser(current);
-      setName(current.name);
-      setRole(current.role || "Farmer");
-      setSelectedAvatar(current.avatar || "🌾");
-      if (current.farmProfile) {
-        setLandSize(current.farmProfile.landSize || 3);
-        setSoilType(current.farmProfile.soilType || "Red Loamy");
-        setIrrigationType(current.farmProfile.irrigationType || "Drip Irrigation");
-      }
-    }
-    setSelectedState(location.state);
-    setSelectedDistrict(location.district);
-  }, [location.state, location.district]);
+  const reloadTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => () => {
+    if (reloadTimerRef.current) clearTimeout(reloadTimerRef.current);
+  }, []);
 
   // Handle state change with instant AppContext & localStorage sync
   const handleStateChange = (stateName: string) => {
-    setSelectedState(stateName);
     const districts = STATE_DISTRICTS[stateName] || [];
     const newDist = districts.length > 0 ? districts[0].name : "";
-    setSelectedDistrict(newDist);
 
     if (newDist) {
       const match = districts.find(d => d.name === newDist);
@@ -187,12 +210,11 @@ export default function SettingsPage() {
         localStorage.setItem("agri_state", stateName);
         localStorage.setItem("agri_district", newDist);
         localStorage.setItem("user_location", JSON.stringify(newLoc));
-      } catch (e) {}
+      } catch {}
     }
   };
 
   const handleDistrictChange = (distName: string) => {
-    setSelectedDistrict(distName);
     const districts = STATE_DISTRICTS[selectedState] || [];
     const match = districts.find(d => d.name === distName);
     const newLoc = {
@@ -206,7 +228,7 @@ export default function SettingsPage() {
       localStorage.setItem("agri_state", selectedState);
       localStorage.setItem("agri_district", distName);
       localStorage.setItem("user_location", JSON.stringify(newLoc));
-    } catch (e) {}
+    } catch {}
   };
 
 
@@ -214,19 +236,17 @@ export default function SettingsPage() {
   const handleSave = () => {
     if (user) {
       // 1. Update Profile (Name, Role, Avatar)
-          updateUserProfile(user.email, name, role, selectedAvatar);
-    updateUserLocation(user.email, selectedState, selectedDistrict);
-    updateFarmProfile(user.email, {
-      landSize,
-      soilType,
-      irrigationType,
-      primaryCrops: user.portfolio || []
-    });
+      updateUserProfile(user.email, name, role, selectedAvatar);
+      const parsedLand = parseFloat(landSize);
+      updateFarmProfile(user.email, {
+        landSize: Number.isFinite(parsedLand) && parsedLand > 0 ? parsedLand : 1,
+        soilType,
+        irrigationType,
+        primaryCrops: user.portfolio || []
+      });
 
       // 2. Update Location
       updateUserLocation(user.email, selectedState, selectedDistrict);
-
-
     }
 
     // 4. Update App Context location coordinates and localStorage
@@ -247,11 +267,12 @@ export default function SettingsPage() {
       localStorage.setItem("agri_state", selectedState);
       localStorage.setItem("agri_district", selectedDistrict);
       localStorage.setItem("user_location", JSON.stringify(newLoc));
-    } catch (e) {}
+    } catch {}
 
     // 5. Show alert
     setShowSuccess(true);
-    setTimeout(() => {
+    if (reloadTimerRef.current) clearTimeout(reloadTimerRef.current);
+    reloadTimerRef.current = setTimeout(() => {
       setShowSuccess(false);
       // Reload page to propagate changes to sidebar completely
       window.location.reload();
@@ -317,17 +338,19 @@ export default function SettingsPage() {
                 {selectedAvatar}
               </div>
               <div style={{ flex: 1 }}>
-                <label style={{ display: "block", fontSize: 12, fontWeight: 600, color: "var(--text-muted)", marginBottom: 4 }}>{L.nameLabel}</label>
-                <input className="input" style={{ width: "100%" }} value={name} onChange={e => setName(e.target.value)} />
+                <label htmlFor="settings-name" style={{ display: "block", fontSize: 12, fontWeight: 600, color: "var(--text-muted)", marginBottom: 4 }}>{L.nameLabel}</label>
+                <input id="settings-name" className="input" style={{ width: "100%" }} value={name} onChange={e => setName(e.target.value)} />
               </div>
             </div>
 
             {/* Avatar Selection */}
             <div>
-              <label style={{ display: "block", fontSize: 12, fontWeight: 600, color: "var(--text-muted)", marginBottom: 6 }}>{L.avatarLabel}</label>
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(8, 1fr)", gap: 8 }}>
+              <label id="settings-avatar-label" style={{ display: "block", fontSize: 12, fontWeight: 600, color: "var(--text-muted)", marginBottom: 6 }}>{L.avatarLabel}</label>
+              <div role="group" aria-labelledby="settings-avatar-label" style={{ display: "grid", gridTemplateColumns: "repeat(8, 1fr)", gap: 8 }}>
                 {AVATARS.map(av => (
-                  <button key={av}
+                  <button key={av} type="button"
+                    aria-label={AVATAR_NAMES[av] ? tr(language, AVATAR_NAMES[av]) : av}
+                    aria-pressed={selectedAvatar === av}
                     style={{
                       height: 40,
                       fontSize: 20,
@@ -350,10 +373,10 @@ export default function SettingsPage() {
 
             {/* Role selection */}
             <div>
-              <label style={{ display: "block", fontSize: 12, fontWeight: 600, color: "var(--text-muted)", marginBottom: 4 }}>{L.roleLabel}</label>
-              <select className="input" style={{ width: "100%" }} value={role} onChange={e => setRole(e.target.value)}>
+              <label htmlFor="settings-role" style={{ display: "block", fontSize: 12, fontWeight: 600, color: "var(--text-muted)", marginBottom: 4 }}>{L.roleLabel}</label>
+              <select id="settings-role" className="input" style={{ width: "100%" }} value={role} onChange={e => setRole(e.target.value)}>
                 {ROLES.map(r => (
-                  <option key={r} value={r}>{r}</option>
+                  <option key={r} value={r}>{tr(language, ROLE_NAMES[r] ?? { en: r })}</option>
                 ))}
               </select>
             </div>
@@ -363,14 +386,15 @@ export default function SettingsPage() {
           {/* 👨‍🌾 Farm Profile Section */}
           <div className="card" style={{ display: "flex", flexDirection: "column", gap: 14 }}>
             <div style={{ fontSize: 15, fontWeight: 700, color: "var(--primary-dark)", borderBottom: "1px solid var(--border)", paddingBottom: 8 }}>
-              👨‍🌾 Personal Farm Profile
+              👨‍🌾 {tr(language, { en: "Personal Farm Profile", ta: "தனிப்பட்ட பண்ணை விவரம்", te: "వ్యక్తిగత వ్యవసాయ వివరాలు", kn: "ವೈಯಕ್ತಿಕ ಜಮೀನು ವಿವರ", ml: "വ്യക്തിഗത ഫാം വിവരങ്ങൾ", hi: "निजी खेत प्रोफ़ाइल" })}
             </div>
 
             <div>
-              <label style={{ display: "block", fontSize: 12, fontWeight: 600, color: "var(--text-muted)", marginBottom: 4 }}>
-                📐 Total Farm Land Area (Acres)
+              <label htmlFor="settings-land" style={{ display: "block", fontSize: 12, fontWeight: 600, color: "var(--text-muted)", marginBottom: 4 }}>
+                📐 {tr(language, { en: "Total Farm Land Area (Acres)", ta: "மொத்த நிலப்பரப்பு (ஏக்கர்)", te: "మొత్తం వ్యవసాయ భూమి (ఎకరాలు)", kn: "ಒಟ್ಟು ಜಮೀನು ವಿಸ್ತೀರ್ಣ (ಎಕರೆ)", ml: "ആകെ കൃഷിഭൂമി (ഏക്കർ)", hi: "कुल खेती की ज़मीन (एकड़)" })}
               </label>
               <input
+                id="settings-land"
                 type="number"
                 min={0.5}
                 max={100}
@@ -378,43 +402,41 @@ export default function SettingsPage() {
                 className="input"
                 style={{ width: "100%", fontWeight: 700 }}
                 value={landSize}
-                onChange={e => setLandSize(parseFloat(e.target.value) || 1)}
+                onChange={e => setLandSize(e.target.value)}
               />
             </div>
 
             <div>
-              <label style={{ display: "block", fontSize: 12, fontWeight: 600, color: "var(--text-muted)", marginBottom: 4 }}>
-                🌱 Primary Soil Type
+              <label htmlFor="settings-soil" style={{ display: "block", fontSize: 12, fontWeight: 600, color: "var(--text-muted)", marginBottom: 4 }}>
+                🌱 {tr(language, { en: "Primary Soil Type", ta: "முதன்மை மண் வகை", te: "ప్రధాన నేల రకం", kn: "ಮುಖ್ಯ ಮಣ್ಣಿನ ಪ್ರಕಾರ", ml: "പ്രധാന മണ്ണിന്റെ തരം", hi: "मुख्य मिट्टी का प्रकार" })}
               </label>
               <select
+                id="settings-soil"
                 className="input"
                 style={{ width: "100%", fontWeight: 600 }}
                 value={soilType}
                 onChange={e => setSoilType(e.target.value)}
               >
-                <option value="Red Loamy">Red Loamy Soil</option>
-                <option value="Black Cotton">Black Cotton Soil</option>
-                <option value="Alluvial">Alluvial Soil</option>
-                <option value="Clay Loam">Clay Loam Soil</option>
-                <option value="Sandy Loam">Sandy Loam Soil</option>
+                {SOIL_OPTIONS.map(o => (
+                  <option key={o.value} value={o.value}>{tr(language, o.label)}</option>
+                ))}
               </select>
             </div>
 
             <div>
-              <label style={{ display: "block", fontSize: 12, fontWeight: 600, color: "var(--text-muted)", marginBottom: 4 }}>
-                💧 Primary Irrigation System
+              <label htmlFor="settings-irrigation" style={{ display: "block", fontSize: 12, fontWeight: 600, color: "var(--text-muted)", marginBottom: 4 }}>
+                💧 {tr(language, { en: "Primary Irrigation System", ta: "முதன்மை பாசன முறை", te: "ప్రధాన నీటిపారుదల విధానం", kn: "ಮುಖ್ಯ ನೀರಾವರಿ ವ್ಯವಸ್ಥೆ", ml: "പ്രധാന ജലസേചന രീതി", hi: "मुख्य सिंचाई प्रणाली" })}
               </label>
               <select
+                id="settings-irrigation"
                 className="input"
                 style={{ width: "100%", fontWeight: 600 }}
                 value={irrigationType}
                 onChange={e => setIrrigationType(e.target.value)}
               >
-                <option value="Drip Irrigation">Drip Irrigation</option>
-                <option value="Canal Irrigation">Canal Irrigation</option>
-                <option value="Borewell / Pump">Borewell / Submersible Pump</option>
-                <option value="Rainfed">Rainfed / Monsoon</option>
-                <option value="Sprinkler">Sprinkler Irrigation</option>
+                {IRRIGATION_OPTIONS.map(o => (
+                  <option key={o.value} value={o.value}>{tr(language, o.label)}</option>
+                ))}
               </select>
             </div>
           </div>
@@ -427,8 +449,8 @@ export default function SettingsPage() {
 
             <div className="grid-cols-2-responsive" style={{ gap: 12 }}>
               <div>
-                <label style={{ display: "block", fontSize: 12, fontWeight: 600, color: "var(--text-muted)", marginBottom: 4 }}>{L.stateLabel}</label>
-                <select className="input" style={{ width: "100%" }} value={selectedState} onChange={e => handleStateChange(e.target.value)}>
+                <label htmlFor="settings-state" style={{ display: "block", fontSize: 12, fontWeight: 600, color: "var(--text-muted)", marginBottom: 4 }}>{L.stateLabel}</label>
+                <select id="settings-state" className="input" style={{ width: "100%" }} value={selectedState} onChange={e => handleStateChange(e.target.value)}>
                   {INDIAN_STATES.map(s => (
                     <option key={s} value={s}>{s}</option>
                   ))}
@@ -436,8 +458,8 @@ export default function SettingsPage() {
               </div>
 
               <div>
-                <label style={{ display: "block", fontSize: 12, fontWeight: 600, color: "var(--text-muted)", marginBottom: 4 }}>{L.districtLabel}</label>
-                <select className="input" style={{ width: "100%" }} value={selectedDistrict} onChange={e => handleDistrictChange(e.target.value)}>
+                <label htmlFor="settings-district" style={{ display: "block", fontSize: 12, fontWeight: 600, color: "var(--text-muted)", marginBottom: 4 }}>{L.districtLabel}</label>
+                <select id="settings-district" className="input" style={{ width: "100%" }} value={selectedDistrict} onChange={e => handleDistrictChange(e.target.value)}>
                   {(STATE_DISTRICTS[selectedState] || []).map(d => (
                     <option key={d.name} value={d.name}>{d.name}</option>
                   ))}
@@ -481,19 +503,19 @@ export default function SettingsPage() {
               {selectedAvatar}
             </div>
             
-            <div style={{ fontSize: 20, fontWeight: 800, textShadow: "0 2px 4px rgba(0,0,0,0.2)" }}>{name || "User"}</div>
+            <div style={{ fontSize: 20, fontWeight: 800, textShadow: "0 2px 4px rgba(0,0,0,0.2)" }}>{name || tr(language, { en: "User", ta: "பயனர்", te: "వినియోగదారు", kn: "ಬಳಕೆದಾರ", ml: "ഉപയോക്താവ്", hi: "उपयोगकर्ता" })}</div>
             <div style={{ fontSize: 13, background: "rgba(255,255,255,0.2)", padding: "4px 12px", borderRadius: 12, marginTop: 6, fontWeight: 600 }}>
-              {role === "Farmer" ? "👨‍🌾 Farmer" : role === "Trader" ? "💼 Trader" : role === "Agronomist" ? "🔬 Agronomist" : role === "Student" ? "🎓 Student" : "👤 Guest"}
+              {ROLE_ICONS[role] ?? ROLE_ICONS.Guest} {tr(language, ROLE_NAMES[role] ?? ROLE_NAMES.Guest)}
             </div>
             
             <div style={{ display: "flex", gap: 16, marginTop: 20, width: "100%", borderTop: "1px solid rgba(255,255,255,0.2)", paddingTop: 14, fontSize: 12, justifyContent: "space-around" }}>
               <div style={{ textAlign: "center" }}>
-                <div style={{ opacity: 0.8, fontSize: 10, textTransform: "uppercase", fontWeight: 700 }}>Location</div>
+                <div style={{ opacity: 0.8, fontSize: 10, textTransform: "uppercase", fontWeight: 700 }}>{tr(language, { en: "Location", ta: "இருப்பிடம்", te: "స్థలం", kn: "ಸ್ಥಳ", ml: "സ്ഥലം", hi: "स्थान" })}</div>
                 <div style={{ fontWeight: 700, marginTop: 2 }}>{selectedDistrict}, {selectedState}</div>
               </div>
               <div style={{ textAlign: "center" }}>
-                <div style={{ opacity: 0.8, fontSize: 10, textTransform: "uppercase", fontWeight: 700 }}>Language</div>
-                <div style={{ fontWeight: 700, marginTop: 2 }}>{{ en: "English", ta: "Tamil", te: "Telugu", kn: "Kannada", ml: "Malayalam", hi: "Hindi" }[language]}</div>
+                <div style={{ opacity: 0.8, fontSize: 10, textTransform: "uppercase", fontWeight: 700 }}>{tr(language, { en: "Language", ta: "மொழி", te: "భాష", kn: "ಭಾಷೆ", ml: "ഭാഷ", hi: "भाषा" })}</div>
+                <div style={{ fontWeight: 700, marginTop: 2 }}>{{ en: "English", ta: "தமிழ்", te: "తెలుగు", kn: "ಕನ್ನಡ", ml: "മലയാളം", hi: "हिंदी" }[language]}</div>
               </div>
             </div>
           </div>
@@ -507,7 +529,9 @@ export default function SettingsPage() {
             {/* Dark Mode Theme */}
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
               <label style={{ fontSize: 13, fontWeight: 600 }}>{L.themeLabel}</label>
-              <button className={`btn ${isDark ? "btn-primary" : "btn-secondary"}`}
+              <button type="button" className={`btn ${isDark ? "btn-primary" : "btn-secondary"}`}
+                aria-label={L.themeLabel}
+                aria-pressed={isDark}
                 style={{
                   width: 60,
                   height: 30,
@@ -527,8 +551,8 @@ export default function SettingsPage() {
 
             {/* Language dropdown */}
             <div>
-              <label style={{ display: "block", fontSize: 12, fontWeight: 600, color: "var(--text-muted)", marginBottom: 4 }}>{L.langLabel}</label>
-              <select className="input" style={{ width: "100%" }} value={language} onChange={e => setLanguage(e.target.value as Language)}>
+              <label htmlFor="settings-language" style={{ display: "block", fontSize: 12, fontWeight: 600, color: "var(--text-muted)", marginBottom: 4 }}>{L.langLabel}</label>
+              <select id="settings-language" className="input" style={{ width: "100%" }} value={language} onChange={e => setLanguage(e.target.value as Language)}>
                 <option value="en">English</option>
                 <option value="ta">Tamil (தமிழ்)</option>
                 <option value="te">Telugu (తెలుగు)</option>

@@ -2,8 +2,11 @@
 
 import { useState } from "react";
 import { CROPS, getCropVolatilityList, formatPrice } from "@/lib/cropData";
+import { useApp } from "@/lib/AppContext";
+import { tr, cropName, categoryName } from "@/lib/i18n";
 
 export default function MarketHeatmap() {
+  const { language } = useApp();
   const [activeCategory, setActiveCategory] = useState<string>("All");
   const volatilityList = getCropVolatilityList();
 
@@ -14,11 +17,11 @@ export default function MarketHeatmap() {
   );
 
   const getHeatmapColor = (change: number) => {
-    if (change >= 5) return { bg: "linear-gradient(135deg, #15803D, #166534)", text: "#fff", badge: "Peak Gainer 🚀" };
-    if (change > 0) return { bg: "linear-gradient(135deg, #4CAF50, #2E7D32)", text: "#fff", badge: "Gaining 📈" };
-    if (change === 0) return { bg: "var(--accent)", text: "var(--text)", badge: "Stable ⚖️" };
-    if (change > -5) return { bg: "linear-gradient(135deg, #F87171, #DC2626)", text: "#fff", badge: "Dropping 📉" };
-    return { bg: "linear-gradient(135deg, #B91C1C, #991B1B)", text: "#fff", badge: "Sharp Drop ⚠️" };
+    if (change >= 5) return { bg: "linear-gradient(135deg, #15803D, #166534)", text: "#fff", badge: tr(language, { en: "Peak Gainer", ta: "உச்ச உயர்வு", te: "అత్యధిక పెరుగుదల", kn: "ಅತಿ ಹೆಚ್ಚು ಏರಿಕೆ", ml: "ഏറ്റവും കൂടിയ ഉയർച്ച", hi: "सबसे ज़्यादा बढ़त" }) + " 🚀" };
+    if (change > 0) return { bg: "linear-gradient(135deg, #4CAF50, #2E7D32)", text: "#fff", badge: tr(language, { en: "Gaining", ta: "உயர்கிறது", te: "పెరుగుతోంది", kn: "ಏರುತ್ತಿದೆ", ml: "ഉയരുന്നു", hi: "बढ़ रहा है" }) + " 📈" };
+    if (change === 0) return { bg: "var(--accent)", text: "var(--text)", badge: tr(language, { en: "Stable", ta: "நிலையானது", te: "స్థిరంగా ఉంది", kn: "ಸ್ಥಿರ", ml: "സ്ഥിരം", hi: "स्थिर" }) + " ⚖️" };
+    if (change > -5) return { bg: "linear-gradient(135deg, #F87171, #DC2626)", text: "#fff", badge: tr(language, { en: "Dropping", ta: "குறைகிறது", te: "తగ్గుతోంది", kn: "ಇಳಿಯುತ್ತಿದೆ", ml: "കുറയുന്നു", hi: "गिर रहा है" }) + " 📉" };
+    return { bg: "linear-gradient(135deg, #B91C1C, #991B1B)", text: "#fff", badge: tr(language, { en: "Sharp Drop", ta: "கடும் சரிவு", te: "భారీ పతనం", kn: "ತೀವ್ರ ಕುಸಿತ", ml: "കുത്തനെ ഇടിവ്", hi: "भारी गिरावट" }) + " ⚠️" };
   };
 
   return (
@@ -29,11 +32,18 @@ export default function MarketHeatmap() {
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
             <span style={{ fontSize: 24 }}>🗺️</span>
             <h3 style={{ fontFamily: "Playfair Display, serif", fontSize: 22, fontWeight: 700, color: "var(--text)" }}>
-              Market Price Trend Heatmap
+              {tr(language, { en: "Market Price Trend Heatmap", ta: "சந்தை விலை போக்கு வரைபடம்", te: "మార్కెట్ ధరల ధోరణి హీట్‌మ్యాప్", kn: "ಮಾರುಕಟ್ಟೆ ಬೆಲೆ ಪ್ರವೃತ್ತಿ ಹೀಟ್‌ಮ್ಯಾಪ್", ml: "വിപണി വില പ്രവണത ഹീറ്റ്‌മാപ്പ്", hi: "बाज़ार भाव रुझान हीटमैप" })}
             </h3>
           </div>
           <p style={{ fontSize: 13, color: "var(--text-muted)", marginTop: 4 }}>
-            Color-coded weekly price movement matrix across national wholesale markets
+            {tr(language, {
+              en: "Color-coded weekly price movement matrix across national wholesale markets",
+              ta: "நாடு முழுவதும் உள்ள மொத்த சந்தைகளில் வாராந்திர விலை மாற்றம் — நிறங்களில்",
+              te: "దేశవ్యాప్త హోల్‌సేల్ మార్కెట్లలో వారపు ధరల మార్పు — రంగుల్లో",
+              kn: "ದೇಶದ ಸಗಟು ಮಾರುಕಟ್ಟೆಗಳಲ್ಲಿ ವಾರದ ಬೆಲೆ ಬದಲಾವಣೆ — ಬಣ್ಣಗಳಲ್ಲಿ",
+              ml: "രാജ്യത്തെ മൊത്തവിപണികളിലെ ആഴ്ചതോറുമുള്ള വില മാറ്റം — നിറങ്ങളിൽ",
+              hi: "देश भर की थोक मंडियों में साप्ताहिक भाव बदलाव — रंगों में",
+            })}
           </p>
         </div>
 
@@ -55,7 +65,7 @@ export default function MarketHeatmap() {
                 transition: "all 0.2s"
               }}
             >
-              {cat}
+              {categoryName(cat, language)}
             </button>
           ))}
         </div>
@@ -74,22 +84,22 @@ export default function MarketHeatmap() {
         fontSize: 12,
         fontWeight: 600
       }}>
-        <span style={{ color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: 0.5, fontSize: 11 }}>Heat Legend:</span>
+        <span style={{ color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: 0.5, fontSize: 11 }}>{tr(language, { en: "Heat Legend:", ta: "நிற விளக்கம்:", te: "రంగుల సూచిక:", kn: "ಬಣ್ಣದ ಸೂಚಿ:", ml: "നിറ സൂചിക:", hi: "रंग संकेत:" })}</span>
         <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
           <span style={{ width: 14, height: 14, borderRadius: 4, background: "#15803D" }} />
-          <span>+5%+ High Gain</span>
+          <span>+5%+ {tr(language, { en: "High Gain", ta: "அதிக உயர்வு", te: "ఎక్కువ పెరుగుదల", kn: "ಹೆಚ್ಚು ಏರಿಕೆ", ml: "കൂടിയ ഉയർച്ച", hi: "ज़्यादा बढ़त" })}</span>
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
           <span style={{ width: 14, height: 14, borderRadius: 4, background: "#4CAF50" }} />
-          <span>+1% to +5% Gain</span>
+          <span>{tr(language, { en: "+1% to +5% Gain", ta: "+1% முதல் +5% உயர்வு", te: "+1% నుండి +5% పెరుగుదల", kn: "+1% ರಿಂದ +5% ಏರಿಕೆ", ml: "+1% മുതൽ +5% വരെ ഉയർച്ച", hi: "+1% से +5% बढ़त" })}</span>
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
           <span style={{ width: 14, height: 14, borderRadius: 4, background: "var(--border)" }} />
-          <span>Stable</span>
+          <span>{tr(language, { en: "Stable", ta: "நிலையானது", te: "స్థిరంగా ఉంది", kn: "ಸ್ಥಿರ", ml: "സ്ഥിരം", hi: "स्थिर" })}</span>
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
           <span style={{ width: 14, height: 14, borderRadius: 4, background: "#B91C1C" }} />
-          <span>-5%+ Sharp Drop</span>
+          <span>-5%+ {tr(language, { en: "Sharp Drop", ta: "கடும் சரிவு", te: "భారీ పతనం", kn: "ತೀವ್ರ ಕುಸಿತ", ml: "കുത്തനെ ഇടിവ്", hi: "भारी गिरावट" })}</span>
         </div>
       </div>
 
@@ -129,10 +139,10 @@ export default function MarketHeatmap() {
                   </span>
                 </div>
                 <div style={{ fontSize: 15, fontWeight: 800, marginTop: 8 }}>
-                  {item.cropName}
+                  {cropName({ id: item.cropId, name: item.cropName }, language)}
                 </div>
                 <div style={{ fontSize: 11.5, opacity: 0.85 }}>
-                  {item.category}
+                  {categoryName(item.category, language)}
                 </div>
               </div>
 

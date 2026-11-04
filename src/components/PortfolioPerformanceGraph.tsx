@@ -2,6 +2,8 @@
 
 import { useMemo } from "react";
 import { CROPS, formatPrice, generatePriceHistoryByTimeframe } from "@/lib/cropData";
+import { useApp } from "@/lib/AppContext";
+import { tr } from "@/lib/i18n";
 import { ResponsiveContainer, AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip } from "recharts";
 
 interface PortfolioPerformanceGraphProps {
@@ -9,11 +11,12 @@ interface PortfolioPerformanceGraphProps {
 }
 
 export default function PortfolioPerformanceGraph({ portfolioIds }: PortfolioPerformanceGraphProps) {
+  const { language } = useApp();
   const trackedCrops = useMemo(() => {
     return CROPS.filter(c => portfolioIds.includes(c.id));
   }, [portfolioIds]);
 
-  const { chartData, currentTotal, initialTotal, changeAmount, changePercent } = useMemo(() => {
+  const { chartData, currentTotal, changeAmount, changePercent } = useMemo(() => {
     if (trackedCrops.length === 0) {
       return { chartData: [], currentTotal: 0, initialTotal: 0, changeAmount: 0, changePercent: 0 };
     }
@@ -64,11 +67,25 @@ export default function PortfolioPerformanceGraph({ portfolioIds }: PortfolioPer
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
             <span style={{ fontSize: 24 }}>📈</span>
             <h3 style={{ fontFamily: "Playfair Display, serif", fontSize: 20, fontWeight: 700, color: "var(--text)" }}>
-              Tracked Crops Portfolio Performance (30 Days)
+              {tr(language, {
+                en: "Tracked Crops Portfolio Performance (30 Days)",
+                ta: "நீங்கள் கண்காணிக்கும் பயிர்களின் மதிப்பு (30 நாட்கள்)",
+                te: "మీరు గమనిస్తున్న పంటల విలువ (30 రోజులు)",
+                kn: "ನೀವು ಗಮನಿಸುತ್ತಿರುವ ಬೆಳೆಗಳ ಮೌಲ್ಯ (30 ದಿನಗಳು)",
+                ml: "നിങ്ങൾ പിന്തുടരുന്ന വിളകളുടെ മൂല്യം (30 ദിവസം)",
+                hi: "आपकी ट्रैक की गई फसलों का मूल्य (30 दिन)",
+              })}
             </h3>
           </div>
           <p style={{ fontSize: 13, color: "var(--text-muted)", marginTop: 2 }}>
-            Cumulative market value trend for your {trackedCrops.length} tracked crops
+            {tr(language, {
+              en: `Cumulative market value trend for your ${trackedCrops.length} tracked crops`,
+              ta: `நீங்கள் கண்காணிக்கும் ${trackedCrops.length} பயிர்களின் மொத்த சந்தை மதிப்பு போக்கு`,
+              te: `మీరు గమనిస్తున్న ${trackedCrops.length} పంటల మొత్తం మార్కెట్ విలువ ధోరణి`,
+              kn: `ನೀವು ಗಮನಿಸುತ್ತಿರುವ ${trackedCrops.length} ಬೆಳೆಗಳ ಒಟ್ಟು ಮಾರುಕಟ್ಟೆ ಮೌಲ್ಯದ ಪ್ರವೃತ್ತಿ`,
+              ml: `നിങ്ങൾ പിന്തുടരുന്ന ${trackedCrops.length} വിളകളുടെ ആകെ വിപണി മൂല്യ പ്രവണത`,
+              hi: `आपकी ${trackedCrops.length} ट्रैक की गई फसलों के कुल बाज़ार मूल्य का रुझान`,
+            })}
           </p>
         </div>
 
@@ -100,7 +117,7 @@ export default function PortfolioPerformanceGraph({ portfolioIds }: PortfolioPer
             <XAxis dataKey="date" tick={{ fontSize: 10, fill: "var(--text-muted)" }} />
             <YAxis tick={{ fontSize: 10, fill: "var(--text-muted)" }} tickFormatter={v => `₹${v}`} width={65} />
             <Tooltip
-              formatter={(val: unknown) => [formatPrice(Number(val)), "Portfolio Value"]}
+              formatter={(val: unknown) => [formatPrice(Number(val)), tr(language, { en: "Portfolio Value", ta: "மொத்த மதிப்பு", te: "మొత్తం విలువ", kn: "ಒಟ್ಟು ಮೌಲ್ಯ", ml: "ആകെ മൂല്യം", hi: "कुल मूल्य" })]}
               contentStyle={{ background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 10, fontSize: 12.5 }}
             />
             <Area

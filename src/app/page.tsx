@@ -3,7 +3,6 @@ import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { getCurrentUser } from "@/lib/auth";
 import { useApp } from "@/lib/AppContext";
-import type { User } from "@/lib/auth";
 import NotificationManager from "@/components/NotificationManager";
 
 const LABELS = {
@@ -19,7 +18,11 @@ const LABELS = {
     analyticsDesc: "Check 30-day forecast curves and price volatility indexes to make informed harvesting decisions.",
     portfolioTitle: "My Tracked Crops",
     portfolioDesc: "Access and manage your personalized portfolio of tracked crops to monitor their value change.",
-    getStarted: "Explore Live Prices →"
+    getStarted: "Explore Live Prices →",
+    exploreTag: "EXPLORE →",
+    consultTag: "CONSULT →",
+    analyzeTag: "ANALYZE →",
+    manageTag: "MANAGE →"
   },
   ta: {
     namaste: "நமஸ்தே",
@@ -28,12 +31,16 @@ const LABELS = {
     cropsTitle: "நேரடி பயிர் விலைகள்",
     cropsDesc: "வகை சார்ந்த வடிகட்டிகளுடன் தானியங்கள், காய்கறிகள், பருப்புகள் மற்றும் பழங்களின் நிகழ்நேர விலைகளை உலாவுக.",
     chatbotTitle: "AgriBot",
-    chatbotDesc: "பூச்சிக் கட்டுப்பாடு, விவசாய ஆலோசனை மற்றும் சந்தை வழிகாட்டுதல்கள் பற்றி ஆங்கிலம், தமிழ் அல்லது தெலுங்கில் கேளுங்கள்.",
+    chatbotDesc: "பூச்சிக் கட்டுப்பாடு, விவசாய ஆலோசனை மற்றும் சந்தை வழிகாட்டுதல்கள் பற்றி ஆங்கிலம், தமிழ், தெலுங்கு, கன்னடம், மலையாளம் அல்லது இந்தியில் கேளுங்கள்.",
     analyticsTitle: "சந்தை பகுப்பாய்வு",
     analyticsDesc: "விவேகமான அறுவடை முடிவுகளை எடுக்க 30 நாள் கணிப்பு வளைவுகள் மற்றும் விலை ஏற்ற இறக்க குறியீடுகளை சரிபார்க்கவும்.",
     portfolioTitle: "என் பயிர்கள்",
     portfolioDesc: "உங்கள் கண்காணிக்கப்படும் பயிர்களின் மதிப்பு மாற்றத்தை கண்காணிக்க உங்கள் தனிப்பயனாக்கப்பட்ட போர்ட்ஃபோலியோவை நிர்வகிக்கவும்.",
-    getStarted: "நேரடி விலைகளை ஆராய்க →"
+    getStarted: "நேரடி விலைகளை ஆராய்க →",
+    exploreTag: "ஆராய்க →",
+    consultTag: "ஆலோசிக்க →",
+    analyzeTag: "பகுப்பாய்வு →",
+    manageTag: "நிர்வகிக்க →"
   },
   te: {
     namaste: "నమస్తే",
@@ -42,12 +49,16 @@ const LABELS = {
     cropsTitle: "ప్రత్యక్ష పంట ధరలు",
     cropsDesc: "వర్గాల వారీగా ఫిల్టర్లతో తృణధాన్యాలు, కూరగాయలు, పప్పుధాన్యాలు మరియు పండ్ల నిజ సమయ ధరలను బ్రౌజ్ చేయండి.",
     chatbotTitle: "AgriBot",
-    chatbotDesc: "తెగుళ్ల నివారణ, వ్యవసాయ సలహాలు మరియు మార్కెట్ మార్గదర్శకాల గురించి ఇంగ్లీష్, తమిళ్ లేదా తెలుగులో చాట్ చేయండి.",
+    chatbotDesc: "తెగుళ్ల నివారణ, వ్యవసాయ సలహాలు మరియు మార్కెట్ మార్గదర్శకాల గురించి ఇంగ్లీష్, తమిళం, తెలుగు, కన్నడ, మలయాళం లేదా హిందీలో చాట్ చేయండి.",
     analyticsTitle: "మార్కెట్ విశ్లేషణలు",
     analyticsDesc: "సమర్థవంతమైన పంట కోత నిర్ణయాలు తీసుకోవడానికి 30 రోజుల ధరల అంచనా వక్రతలను మరియు ధరల హెచ్చుతగ్గుల సూచికలను తనిఖీ చేయండి.",
     portfolioTitle: "నా పంటలు",
     portfolioDesc: "మీరు ట్రాక్ చేసిన పంటల విలువ మార్పులను పర్యవేక్షించడానికి మీ వ్యక్తిగతీకరించిన పోర్ట్‌ఫోలియోను నిర్వహించండి.",
-    getStarted: "ధరలను వీక్షించండి →"
+    getStarted: "ధరలను వీక్షించండి →",
+    exploreTag: "చూడండి →",
+    consultTag: "సంప్రదించండి →",
+    analyzeTag: "విశ్లేషించండి →",
+    manageTag: "నిర్వహించండి →"
   },
   kn: {
     namaste: "ನಮಸ್ಕಾರ",
@@ -61,7 +72,11 @@ const LABELS = {
     analyticsDesc: "ಸುಲಭವಾಗಿ ಕಟಾವು ನಿರ್ಧಾರಗಳನ್ನು ತೆಗೆದುಕೊಳ್ಳಲು 30 ದಿನಗಳ ಬೆಲೆ ಮುನ್ಸೂಚನೆಗಳನ್ನು ವೀಕ್ಷಿಸಿ.",
     portfolioTitle: "ನನ್ನ ಬೆಳೆಗಳು",
     portfolioDesc: "ನಿಮ್ಮ ಟ್ರ್ಯಾಕ್ ಮಾಡಲಾದ ಬೆಳೆಗಳ ಮೌಲ್ಯ ಬದಲಾವಣೆಯನ್ನು ವೀಕ್ಷಿಸಿ.",
-    getStarted: "ಲೈವ್ ಬೆಲೆಗಳನ್ನು ವೀಕ್ಷಿಸಿ →"
+    getStarted: "ಲೈವ್ ಬೆಲೆಗಳನ್ನು ವೀಕ್ಷಿಸಿ →",
+    exploreTag: "ನೋಡಿ →",
+    consultTag: "ಸಲಹೆ ಪಡೆಯಿರಿ →",
+    analyzeTag: "ವಿಶ್ಲೇಷಿಸಿ →",
+    manageTag: "ನಿರ್ವಹಿಸಿ →"
   },
   ml: {
     namaste: "നമസ്കാരം",
@@ -75,7 +90,11 @@ const LABELS = {
     analyticsDesc: "30 ദിവസത്തെ വില പ്രവചനങ്ങൾ പരിശോധിക്കുക.",
     portfolioTitle: "എന്റെ വിളകൾ",
     portfolioDesc: "നിങ്ങളുടെ വിളകളുടെ വിവരങ്ങൾ കൈകാര്യം ചെയ്യുക.",
-    getStarted: "വിലകൾ പരിശോധിക്കുക →"
+    getStarted: "വിലകൾ പരിശോധിക്കുക →",
+    exploreTag: "കാണുക →",
+    consultTag: "ചോദിക്കുക →",
+    analyzeTag: "വിശകലനം →",
+    manageTag: "നിയന്ത്രിക്കുക →"
   },
   hi: {
     namaste: "नमस्ते",
@@ -89,20 +108,24 @@ const LABELS = {
     analyticsDesc: "कटाई के सटीक निर्णय लेने के लिए 30-दिवसीय मूल्य पूर्वानुमान देखें।",
     portfolioTitle: "मेरी ट्रैक की गई फसलें",
     portfolioDesc: "अपनी चुनी हुई फसलों के मूल्य परिवर्तन की निगरानी करें।",
-    getStarted: "लाइव कीमतें देखें →"
+    getStarted: "लाइव कीमतें देखें →",
+    exploreTag: "देखें →",
+    consultTag: "सलाह लें →",
+    analyzeTag: "विश्लेषण करें →",
+    manageTag: "प्रबंधित करें →"
   }
 };
 
 export default function DashboardIntroPage() {
   const router = useRouter();
   const { language } = useApp();
-  const [user, setUser] = useState<User | null>(null);
+  // Client-only page (ClientLayout mounts children after hydration), so reading localStorage here is safe.
+  const [user] = useState(getCurrentUser);
   const L = LABELS[language as keyof typeof LABELS] || LABELS.en;
 
   useEffect(() => {
-    setUser(getCurrentUser());
-    ["/crops", "/my-crops", "/analytics", "/schemes", "/tools", "/chatbot", "/ocr", "/settings"].forEach(path => {
-      try { router.prefetch(path); } catch (e) {}
+    ["/crops", "/my-crops", "/analytics", "/schemes", "/tools", "/chatbot", "/documents", "/settings"].forEach(path => {
+      try { router.prefetch(path); } catch {}
     });
   }, [router]);
 
@@ -181,7 +204,7 @@ export default function DashboardIntroPage() {
               <div style={{ fontSize: "28px", background: "var(--accent)", width: "50px", height: "50px", borderRadius: "12px", display: "flex", alignItems: "center", justifyContent: "center" }}>
                 💰
               </div>
-              <span style={{ fontSize: "14px", color: "var(--primary)", fontWeight: 700 }}>EXPLORE →</span>
+              <span style={{ fontSize: "14px", color: "var(--primary)", fontWeight: 700 }}>{L.exploreTag}</span>
             </div>
             <h3 style={{ fontFamily: "Playfair Display, serif", fontSize: "18px", fontWeight: 700, marginBottom: "8px", color: "var(--text)" }}>
               {L.cropsTitle}
@@ -199,7 +222,7 @@ export default function DashboardIntroPage() {
               <div style={{ fontSize: "28px", background: "var(--accent)", width: "50px", height: "50px", borderRadius: "12px", display: "flex", alignItems: "center", justifyContent: "center" }}>
                 🤖
               </div>
-              <span style={{ fontSize: "14px", color: "var(--primary)", fontWeight: 700 }}>CONSULT →</span>
+              <span style={{ fontSize: "14px", color: "var(--primary)", fontWeight: 700 }}>{L.consultTag}</span>
             </div>
             <h3 style={{ fontFamily: "Playfair Display, serif", fontSize: "18px", fontWeight: 700, marginBottom: "8px", color: "var(--text)" }}>
               {L.chatbotTitle}
@@ -217,7 +240,7 @@ export default function DashboardIntroPage() {
               <div style={{ fontSize: "28px", background: "var(--accent)", width: "50px", height: "50px", borderRadius: "12px", display: "flex", alignItems: "center", justifyContent: "center" }}>
                 📊
               </div>
-              <span style={{ fontSize: "14px", color: "var(--primary)", fontWeight: 700 }}>ANALYZE →</span>
+              <span style={{ fontSize: "14px", color: "var(--primary)", fontWeight: 700 }}>{L.analyzeTag}</span>
             </div>
             <h3 style={{ fontFamily: "Playfair Display, serif", fontSize: "18px", fontWeight: 700, marginBottom: "8px", color: "var(--text)" }}>
               {L.analyticsTitle}
@@ -235,7 +258,7 @@ export default function DashboardIntroPage() {
               <div style={{ fontSize: "28px", background: "var(--accent)", width: "50px", height: "50px", borderRadius: "12px", display: "flex", alignItems: "center", justifyContent: "center" }}>
                 ⭐
               </div>
-              <span style={{ fontSize: "14px", color: "var(--primary)", fontWeight: 700 }}>MANAGE →</span>
+              <span style={{ fontSize: "14px", color: "var(--primary)", fontWeight: 700 }}>{L.manageTag}</span>
             </div>
             <h3 style={{ fontFamily: "Playfair Display, serif", fontSize: "18px", fontWeight: 700, marginBottom: "8px", color: "var(--text)" }}>
               {L.portfolioTitle}

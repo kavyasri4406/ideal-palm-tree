@@ -1,7 +1,7 @@
 // AgriPredict Service Worker for Native Web Push Notifications
 // Works on Android, Windows, macOS, iOS (PWA), Linux
 
-self.addEventListener("install", (event) => {
+self.addEventListener("install", () => {
   self.skipWaiting();
 });
 
@@ -14,7 +14,7 @@ self.addEventListener("push", (event) => {
   if (event.data) {
     try {
       data = event.data.json();
-    } catch (e) {
+    } catch {
       data = { title: "AgriPredict Alert", body: event.data.text() };
     }
   }
@@ -22,11 +22,11 @@ self.addEventListener("push", (event) => {
   const title = data.title || "🌾 AgriPredict Alert";
   const options = {
     body: data.body || "Real-time Mandi price & weather advisory update.",
-    icon: data.icon || "/favicon.ico",
-    badge: data.badge || "/favicon.ico",
+    icon: data.icon || "/icon.png",
+    badge: data.badge || "/icon.png",
     vibrate: [100, 50, 100],
     data: {
-      url: data.url || "/market-prices",
+      url: data.url || "/crops",
       dateOfArrival: Date.now(),
       primaryKey: 1
     },
@@ -56,23 +56,27 @@ self.addEventListener("notificationclick", (event) => {
     return;
   }
 
-  const targetUrl = event.notification.data?.url || "/";
+  // Only ever open pages of this app, never an arbitrary URL from the push payload
+  let targetUrl = new URL("/", self.location.origin).href;
+  try {
+    const candidate = new URL(event.notification.data?.url || "/", self.location.origin);
+    if (candidate.origin === self.location.origin) targetUrl = candidate.href;
+  } catch {
+    // keep the home page
+  }
 
   event.waitUntil(
     clients.matchAll({ type: "window", includeUncontrolled: true }).then((windowClients) => {
       // If a window is already open, focus it and navigate
-      for (const client of windowClients) {
-        if ("focus" in client) {
-          if (client.url.includes(self.origin)) {
-            client.navigate(targetUrl);
-            return client.focus();
-          }
-        }
+      const existing = windowClients.find((client) => client.url.startsWith(self.location.origin) && "focus" in client);
+      if (existing) {
+        // navigate() rejects for windows this worker doesn't control; fall back to a new window
+        return existing.focus()
+          .then((client) => client.navigate(targetUrl))
+          .catch(() => clients.openWindow(targetUrl));
       }
       // Otherwise open a new tab/window
-      if (clients.openWindow) {
-        return clients.openWindow(targetUrl);
-      }
+      return clients.openWindow(targetUrl);
     })
   );
 });

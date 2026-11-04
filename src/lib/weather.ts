@@ -14,6 +14,7 @@ export interface WeatherData {
     maxTemp: number;
     minTemp: number;
     precipitation: number;
+    icon: string;
   }[];
 }
 
@@ -57,14 +58,25 @@ const WMO_CODES: Record<number, { condition: string; icon: string }> = {
   51: { condition: "Light Drizzle", icon: "🌦️" },
   53: { condition: "Drizzle", icon: "🌦️" },
   55: { condition: "Dense Drizzle", icon: "🌧️" },
+  56: { condition: "Light Freezing Drizzle", icon: "🌨️" },
+  57: { condition: "Dense Freezing Drizzle", icon: "🌨️" },
   61: { condition: "Light Rain", icon: "🌧️" },
   63: { condition: "Moderate Rain", icon: "🌧️" },
   65: { condition: "Heavy Rain", icon: "🌧️" },
+  66: { condition: "Light Freezing Rain", icon: "🌨️" },
+  67: { condition: "Heavy Freezing Rain", icon: "🌨️" },
+  71: { condition: "Light Snowfall", icon: "🌨️" },
+  73: { condition: "Moderate Snowfall", icon: "🌨️" },
+  75: { condition: "Heavy Snowfall", icon: "❄️" },
+  77: { condition: "Snow Grains", icon: "🌨️" },
   80: { condition: "Rain Showers", icon: "🌦️" },
   81: { condition: "Moderate Showers", icon: "🌦️" },
   82: { condition: "Violent Showers", icon: "⛈️" },
+  85: { condition: "Light Snow Showers", icon: "🌨️" },
+  86: { condition: "Heavy Snow Showers", icon: "❄️" },
   95: { condition: "Thunderstorm", icon: "⛈️" },
   96: { condition: "Thunderstorm w/ Hail", icon: "⛈️" },
+  99: { condition: "Thunderstorm w/ Heavy Hail", icon: "⛈️" },
 };
 
 function getCropImpact(condition: string, humidity: number, temp: number): { impact: "Low" | "Medium" | "High"; note: string } {
@@ -105,6 +117,7 @@ export async function fetchWeather(lat: number, lon: number, city: string): Prom
       return {
         date,
         condition: dayCondition,
+        icon: WMO_CODES[code]?.icon || "⛅",
         maxTemp: Math.round(data.daily.temperature_2m_max[i]),
         minTemp: Math.round(data.daily.temperature_2m_min[i]),
         precipitation: parseFloat((data.daily.precipitation_sum[i] || 0).toFixed(1)),
@@ -140,9 +153,11 @@ function getMockWeather(city: string): WeatherData {
     forecast: Array.from({ length: 7 }, (_, i) => {
       const d = new Date();
       d.setDate(d.getDate() + i);
+      const day = [conditions[1], conditions[0], conditions[2], conditions[3]][i % 4]; // Sunny, Partly Cloudy, Light Rain, Overcast
       return {
         date: d.toISOString().slice(0, 10),
-        condition: ["Sunny", "Partly Cloudy", "Light Rain", "Overcast"][i % 4],
+        condition: day.condition,
+        icon: day.icon,
         maxTemp: pick.temp + Math.round((Math.random() - 0.4) * 4),
         minTemp: pick.temp - 6 + Math.round(Math.random() * 4),
         precipitation: Math.random() > 0.6 ? parseFloat((Math.random() * 15).toFixed(1)) : 0,
