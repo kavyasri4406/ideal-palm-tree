@@ -9,7 +9,7 @@ const MINUTE = 60 * 1000;
 // Requests per minute from one IP address
 export const LIMITS = {
   chat: createRateLimiter(20, MINUTE),
-  ocr: createRateLimiter(6, MINUTE),
+  ocr: createRateLimiter(12, MINUTE),
   mandiPrices: createRateLimiter(40, MINUTE),
   priceHistory: createRateLimiter(40, MINUTE),
 };

@@ -148,7 +148,7 @@ export default function CropsPage() {
             📍 {location.district}, {location.state} · {L.greeting}, {greeting}!
           </div>
         </div>
-        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+        <div className="responsive-header-controls">
           <div style={{ display: "flex", gap: 4, background: "var(--accent)", padding: 4, borderRadius: 10, border: "1px solid var(--border)" }}>
             <button
               onClick={() => setViewMode("grid")}

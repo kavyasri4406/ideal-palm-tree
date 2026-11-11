@@ -35,6 +35,8 @@ export interface OcrResult {
   actionItemsML?: string[];
   actionItemsHI?: string[];
   actionItems?: string[];
+  // Languages the AI wrote; others show English until translated on demand. Absent on older saved scans.
+  languages?: string[];
 }
 
 export interface HistoryItem {
@@ -158,6 +160,8 @@ export default function DocumentOcr() {
     }
   });
   const [showHistory, setShowHistory] = useState(false);
+  const [translating, setTranslating] = useState<ScanLang | null>(null);
+  const [translateError, setTranslateError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const saveToHistory = (fileName: string, res: OcrResult, mode?: string) => {
@@ -201,6 +205,7 @@ export default function DocumentOcr() {
     try {
       const formData = new FormData();
       formData.append("file", compressed);
+      formData.append("language", language);
 
       // The AI writes the result in 6 languages, which can take a while
       const controller = new AbortController();
@@ -222,6 +227,8 @@ export default function DocumentOcr() {
       }
 
       setOcrResult(data.result);
+      setSummaryLang(language);
+      setTranslateError(null);
       setScanMode(describeMode(data.mode));
       saveToHistory(file.name, data.result, data.mode);
     } catch (err) {
@@ -242,7 +249,7 @@ export default function DocumentOcr() {
       const res = await fetch("/api/ocr", {
         method: "POST",
         headers: { "Content-Type": "application/json", ...(await authHeaders()) },
-        body: JSON.stringify({ demoKey, fileName }),
+        body: JSON.stringify({ demoKey, fileName, language }),
       });
 
       const data = await res.json();
@@ -253,6 +260,8 @@ export default function DocumentOcr() {
       }
 
       setOcrResult(data.result);
+      setSummaryLang(language);
+      setTranslateError(null);
       setScanMode(describeMode(data.mode));
       saveToHistory(label, data.result, data.mode);
     } catch (err) {
@@ -278,6 +287,48 @@ export default function DocumentOcr() {
 
   const handleDragOver = (e: React.DragEvent<HTMLDivElement>) => {
     e.preventDefault();
+  };
+
+  // Languages other than the scan language are written by a cheap text model when first opened
+  const selectSummaryLang = async (lang: ScanLang) => {
+    setSummaryLang(lang);
+    setTranslateError(null);
+    const current = ocrResult;
+    if (!current || lang === "en" || !current.languages || current.languages.includes(lang)) return;
+
+    setTranslating(lang);
+    const S = lang.toUpperCase();
+    try {
+      const res = await fetch("/api/ocr", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...(await authHeaders()) },
+        body: JSON.stringify({
+          action: "translate",
+          to: lang,
+          fields: { whatIsThis: current.whatIsThisEN, howToUse: current.howToUseEN, summary: current.summaryEN, actionItems: current.actionItemsEN },
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data.translated) {
+        setTranslateError(data.error || tr(language, { en: "Could not translate right now. Showing English.", ta: "இப்போது மொழிபெயர்க்க முடியவில்லை. ஆங்கிலத்தில் காட்டப்படுகிறது.", te: "ఇప్పుడు అనువదించలేకపోయాం. ఇంగ్లీష్ చూపబడుతోంది.", kn: "ಈಗ ಅನುವಾದಿಸಲು ಸಾಧ್ಯವಾಗಲಿಲ್ಲ. ಇಂಗ್ಲಿಷ್ ತೋರಿಸಲಾಗುತ್ತಿದೆ.", ml: "ഇപ്പോൾ വിവർത്തനം ചെയ്യാനായില്ല. ഇംഗ്ലീഷ് കാണിക്കുന്നു.", hi: "अभी अनुवाद नहीं हो सका। अंग्रेज़ी दिखाई जा रही है।" }));
+        return;
+      }
+      const t = data.translated as { whatIsThis: string; howToUse: string; summary: string; actionItems: string[] };
+      const merged: OcrResult = {
+        ...current,
+        [`whatIsThis${S}`]: t.whatIsThis,
+        [`howToUse${S}`]: t.howToUse,
+        [`summary${S}`]: t.summary,
+        [`actionItems${S}`]: t.actionItems,
+        languages: [...(current.languages || []), lang],
+      };
+      setOcrResult(prev => (prev === current ? merged : prev));
+      saveToHistory(scannedFileName || "document", merged, scanMode);
+    } catch {
+      setTranslateError(tr(language, { en: "Could not reach the translator. Showing English.", ta: "மொழிபெயர்ப்பாளருடன் இணைக்க முடியவில்லை. ஆங்கிலத்தில் காட்டப்படுகிறது.", te: "అనువాదకుడిని చేరుకోలేకపోయాం. ఇంగ్లీష్ చూపబడుతోంది.", kn: "ಅನುವಾದಕವನ್ನು ತಲುಪಲಾಗಲಿಲ್ಲ. ಇಂಗ್ಲಿಷ್ ತೋರಿಸಲಾಗುತ್ತಿದೆ.", ml: "വിവർത്തകനിലേക്ക് എത്താനായില്ല. ഇംഗ്ലീഷ് കാണിക്കുന്നു.", hi: "अनुवादक से संपर्क नहीं हो सका। अंग्रेज़ी दिखाई जा रही है।" }));
+    } finally {
+      setTranslating(null);
+    }
   };
 
   const reset = () => {
@@ -556,7 +607,7 @@ export default function DocumentOcr() {
               {(["en", "ta", "te", "kn", "ml", "hi"] as ScanLang[]).map(lang => (
                 <button
                   key={lang}
-                  onClick={() => setSummaryLang(lang)}
+                  onClick={() => selectSummaryLang(lang)}
                   style={{
                     padding: "4px 10px",
                     borderRadius: 8,
@@ -573,6 +624,14 @@ export default function DocumentOcr() {
               ))}
             </div>
           </div>
+
+          {(translating || translateError) && (
+            <div role="status" style={{ fontSize: 12, fontWeight: 600, marginBottom: 12, color: translateError ? "#991B1B" : "var(--text-muted)" }}>
+              {translateError
+                ? `⚠️ ${translateError}`
+                : `⏳ ${tr(language, { en: "Translating…", ta: "மொழிபெயர்க்கிறது…", te: "అనువదిస్తోంది…", kn: "ಅನುವಾದಿಸಲಾಗುತ್ತಿದೆ…", ml: "വിവർത്തനം ചെയ്യുന്നു…", hi: "अनुवाद हो रहा है…" })}`}
+            </div>
+          )}
 
           {/* Section 1: WHAT IS THIS FILE / DOCUMENT */}
           {getWhatIsThis() && (

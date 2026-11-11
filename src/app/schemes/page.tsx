@@ -1060,6 +1060,35 @@ export default function GovernmentSchemesPage() {
       </div>
 
       {/* ── Top Action Quick-Cards Hub (9 Arranged Frames) ── */}
+      {/* ── Search: always visible, so schemes can be found without scrolling past the tiles ── */}
+      <div style={{ position: "relative", marginBottom: 14 }}>
+        <span aria-hidden="true" style={{ position: "absolute", left: 14, top: "50%", transform: "translateY(-50%)", fontSize: 16, color: "var(--text-muted)", pointerEvents: "none" }}>🔍</span>
+        <input
+          type="search"
+          value={searchQuery}
+          onChange={e => {
+            setSearchQuery(e.target.value);
+            // Results live in the schemes list, so searching from any other view jumps back to it
+            if (e.target.value.trim()) setActiveView("schemes");
+          }}
+          placeholder={L.searchPlaceholder}
+          aria-label={L.searchPlaceholder}
+          className="input"
+          style={{ paddingLeft: 42, paddingRight: 42, borderRadius: 14, fontSize: 14, width: "100%", height: 46 }}
+        />
+        {searchQuery && (
+          <button
+            onClick={() => setSearchQuery("")}
+            aria-label={tr(language, { en: "Clear search", ta: "தேடலை அழி", te: "శోధన తొలగించండి", kn: "ಹುಡುಕಾಟ ಅಳಿಸಿ", ml: "തിരയൽ മായ്ക്കുക", hi: "खोज हटाएं" })}
+            style={{ position: "absolute", right: 8, top: "50%", transform: "translateY(-50%)", background: "none", border: "none", cursor: "pointer", fontSize: 16, color: "var(--text-muted)", width: 32, height: 32 }}
+          >
+            ✕
+          </button>
+        )}
+      </div>
+
+      {/* The tile hub collapses while searching so the results start right below the search box */}
+      {!searchQuery.trim() && (
       <div style={{
         display: "grid",
         gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))",
@@ -1340,6 +1369,7 @@ export default function GovernmentSchemesPage() {
           </div>
         </Link>
       </div>
+      )}
 
       {/* ── Active View Indicator Bar ──────────────────────── */}
       <div style={{
@@ -1452,37 +1482,6 @@ export default function GovernmentSchemesPage() {
               alignItems: "center",
               marginBottom: 14
             }}>
-              {/* Search input */}
-              <div style={{ position: "relative" }}>
-                <span style={{ position: "absolute", left: 14, top: 11, fontSize: 16, color: "var(--text-muted)" }}>🔍</span>
-                <input
-                  type="text"
-                  value={searchQuery}
-                  onChange={e => setSearchQuery(e.target.value)}
-                  placeholder={L.searchPlaceholder}
-                  className="input"
-                  style={{ paddingLeft: 40, borderRadius: 12, fontSize: 13.5, width: "100%" }}
-                />
-                {searchQuery && (
-                  <button
-                    onClick={() => setSearchQuery("")}
-                    title={tr(language, { en: "Clear search", ta: "தேடலை அழி", te: "శోధన తొలగించండి", kn: "ಹುಡುಕಾಟ ಅಳಿಸಿ", ml: "തിരയൽ മായ്ക്കുക", hi: "खोज साफ़ करें" })}
-                    style={{
-                      position: "absolute",
-                      right: 12,
-                      top: 11,
-                      background: "none",
-                      border: "none",
-                      cursor: "pointer",
-                      fontSize: 14,
-                      color: "var(--text-muted)"
-                    }}
-                  >
-                    ✕
-                  </button>
-                )}
-              </div>
-
               {/* All Categories Filter */}
               <div>
                 <select

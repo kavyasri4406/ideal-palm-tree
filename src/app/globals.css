@@ -313,7 +313,7 @@ tr:last-child td { border-bottom: none; }
    Keep whole words so a wide table scrolls sideways inside .table-wrap instead. */
 .table-wrap th, .table-wrap td { word-break: normal; overflow-wrap: normal; }
 .table-wrap th { white-space: nowrap; }
-@media (max-width: 640px) {
+@container app (max-width: 640px) {
   .table-wrap th, .table-wrap td { padding: 10px 12px; }
 }
 tr:hover td { background: var(--accent); }
@@ -442,8 +442,7 @@ tr:hover td { background: var(--accent); }
 .dark-mode .recharts-cartesian-axis-tick-value { fill: var(--text-muted) !important; }
 .dark-mode .recharts-legend-item-text { color: var(--text-muted) !important; }
 
-@media (max-width: 768px) {
-  :root { --sidebar-width: 0px; }
+@container app (max-width: 768px) {
   .sidebar { transform: translateX(-260px); }
   .sidebar.mobile-open { transform: translateX(0); --sidebar-width: 260px; }
   .main-layout {
@@ -465,12 +464,12 @@ tr:hover td { background: var(--accent); }
   display: grid;
   grid-template-columns: repeat(4, 1fr);
 }
-@media (max-width: 1024px) {
+@container app (max-width: 1024px) {
   .grid-cols-4-responsive {
     grid-template-columns: repeat(2, 1fr);
   }
 }
-@media (max-width: 640px) {
+@container app (max-width: 640px) {
   .grid-cols-4-responsive {
     grid-template-columns: 1fr;
   }
@@ -480,7 +479,7 @@ tr:hover td { background: var(--accent); }
   display: grid;
   grid-template-columns: 1fr 1fr;
 }
-@media (max-width: 768px) {
+@container app (max-width: 768px) {
   .grid-cols-2-responsive {
     grid-template-columns: 1fr;
   }
@@ -490,7 +489,7 @@ tr:hover td { background: var(--accent); }
   display: grid;
   grid-template-columns: 1fr 340px;
 }
-@media (max-width: 992px) {
+@container app (max-width: 992px) {
   .split-layout-2col {
     grid-template-columns: 1fr;
   }
@@ -503,7 +502,7 @@ tr:hover td { background: var(--accent); }
 
 .mobile-header { display: none !important; }
 
-@media (max-width: 768px) {
+@container app (max-width: 768px) {
   .mobile-header { display: flex !important; }
 }
 
@@ -536,12 +535,12 @@ img, video, iframe, canvas, svg {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
 }
-@media (max-width: 992px) {
+@container app (max-width: 992px) {
   .grid-cols-3-responsive {
     grid-template-columns: repeat(2, 1fr);
   }
 }
-@media (max-width: 640px) {
+@container app (max-width: 640px) {
   .grid-cols-3-responsive {
     grid-template-columns: 1fr;
   }
@@ -561,7 +560,7 @@ img, video, iframe, canvas, svg {
   max-width: 100%;
 }
 
-@media (max-width: 640px) {
+@container app (max-width: 640px) {
   .responsive-header-controls {
     width: 100%;
     margin-top: 10px;
@@ -630,9 +629,64 @@ img, video, iframe, canvas, svg {
   white-space: nowrap;
 }
 
-@media (max-width: 768px) {
+@container app (max-width: 768px) {
   .main-layout {
     margin-left: 0;
     width: 100%;
   }
 }
+
+/* ── Phone frame ───────────────────────────────────────────────
+   The whole app lives in a phone-sized column. On a real phone the frame is the full screen; on
+   a larger screen it is a centred 430px "phone" with the page background around it. The layout
+   rules above are container queries on this frame, so they follow its width, not the window's. */
+.app-shell {
+  min-height: 100dvh;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  background: var(--accent);
+}
+.app-frame {
+  container: app / inline-size;
+  --sidebar-width: 0px;
+  position: relative;
+  width: 100%;
+  max-width: 430px;
+  height: 100dvh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: var(--bg);
+  /* Makes position: fixed children (menu, backdrop, toasts, install banner) fixed to the frame */
+  transform: translateZ(0);
+}
+@media (min-width: 520px) {
+  .app-shell { padding: 16px 0; }
+  .app-frame {
+    height: min(calc(100dvh - 32px), 900px);
+    border-radius: 30px;
+    border: 1px solid var(--border-dark);
+    box-shadow: 0 24px 64px rgba(0, 0, 0, 0.28);
+  }
+}
+.frame-scroll { flex: 1; min-height: 0; overflow-y: auto; }
+.frame-row { display: flex; flex: 1; min-height: 0; position: relative; }
+.app-frame .main-layout {
+  margin-left: 0;
+  width: 100%;
+  height: auto;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+}
+.app-frame .main-layout.is-chatbot-layout,
+.app-frame .main-layout:has(.chatbot-wrapper) { height: auto !important; overflow: hidden; }
+/* A page root with max-width + margin: auto would otherwise shrink-wrap its widest content (and
+   be clipped) instead of fitting the screen */
+.app-frame .main-layout > * { width: 100%; min-width: 0; }
+.app-frame .sidebar { min-height: 0; height: 100%; }
+.app-frame .login-page { min-height: 100%; }
+

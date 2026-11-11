@@ -16,6 +16,9 @@ module in depth.
 - **AgriBot** — a chatbot with voice input and output, powered by Groq, with an offline fallback.
 - **Document scanner** — explains farm documents (soil cards, receipts, loan letters) using a Groq
   vision model.
+  Each scan returns English plus your language; other languages are translated when you open their
+  tab. If Groq's per-minute limit is reached the scanner says so and asks you to retry, instead of
+  showing made-up text.
 - **Price alerts** — push notifications when a crop crosses a price you set.
 - **Schemes and tools** — government schemes, a KCC loan calculator, a PM-Kisan tracker, a crop
   calendar and a cost/profit estimator.
@@ -47,6 +50,13 @@ it exists only on that device.
 | `GROQ_API_KEY` | AgriBot answers and the document scanner. |
 | `NEXT_PUBLIC_VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY`, `VAPID_SUBJECT` | Push notifications. Generate keys with `node scripts/gen_vapid.cjs`. |
 | `SUPABASE_SECRET_KEY`, `PUSH_ADMIN_TOKEN` | Optional: durable push subscriptions and broadcast pushes. |
+
+## Phone layout
+
+The whole app is shown inside a phone-sized frame (430 px wide). On a phone it fills the screen;
+on a laptop it appears as a centred "phone" so every screen looks the same. The responsive CSS
+uses container queries on that frame (`.app-frame` in `src/app/globals.css`), so layouts follow the
+frame's width, not the browser window's.
 
 ## Install on a phone
 

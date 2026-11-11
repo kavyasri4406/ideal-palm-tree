@@ -86,3 +86,11 @@ export function parseJsonReply(text: string): Record<string, unknown> | null {
     return null;
   }
 }
+
+/** Seconds from Groq's "Please try again in 45.48s" / "1m5.2s" / "850ms" rate-limit message. */
+export function parseRetryAfter(message: string): number | undefined {
+  const m = /try again in\s+(?:(\d+)m)?\s*([\d.]+)\s*(ms|s)\b/i.exec(message);
+  if (!m) return undefined;
+  const value = parseFloat(m[2]) / (m[3].toLowerCase() === "ms" ? 1000 : 1);
+  return Math.ceil((m[1] ? parseInt(m[1], 10) * 60 : 0) + value);
+}

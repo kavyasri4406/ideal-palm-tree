@@ -3,7 +3,7 @@ import { useState, useRef, useEffect, useCallback } from "react";
 import { getChatbotResponse, createMessage, QUICK_PROMPTS, LANG_LABELS, detectLanguage } from "@/lib/chatbot";
 import { useApp } from "@/lib/AppContext";
 import type { ChatMessage, Language } from "@/lib/chatbot";
-import { tr } from "@/lib/i18n";
+import { tr, type Localized } from "@/lib/i18n";
 import { authHeaders } from "@/lib/apiClient";
 
 const WELCOME: Partial<Record<Language, string>> = {
@@ -41,6 +41,15 @@ const LOCALES: Record<Language, string> = {
   hi: "hi-IN"
 };
 
+// Shown above the message box when voice input cannot work (instead of silently doing nothing)
+const MIC_TEXT = {
+  noMic: { en: "No microphone was found. Please connect one and try again.", ta: "மைக்ரோஃபோன் கிடைக்கவில்லை. ஒன்றை இணைத்து மீண்டும் முயற்சிக்கவும்.", te: "మైక్రోఫోన్ కనబడలేదు. ఒకటి కనెక్ట్ చేసి మళ్లీ ప్రయత్నించండి.", kn: "ಮೈಕ್ರೊಫೋನ್ ಕಂಡುಬಂದಿಲ್ಲ. ಒಂದನ್ನು ಸಂಪರ್ಕಿಸಿ ಮತ್ತೆ ಪ್ರಯತ್ನಿಸಿ.", ml: "മൈക്രോഫോൺ കണ്ടെത്തിയില്ല. ഒന്ന് ബന്ധിപ്പിച്ച് വീണ്ടും ശ്രമിക്കുക.", hi: "माइक्रोफ़ोन नहीं मिला। कृपया एक कनेक्ट करें और फिर से प्रयास करें।" },
+  network: { en: "Voice input could not reach the speech service. Check your internet connection, or use Google Chrome.", ta: "குரல் சேவையுடன் இணைக்க முடியவில்லை. இணைய இணைப்பைச் சரிபார்க்கவும் அல்லது Google Chrome பயன்படுத்தவும்.", te: "వాయిస్ సేవను చేరుకోలేకపోయాం. ఇంటర్నెట్ కనెక్షన్ చూడండి లేదా Google Chrome ఉపయోగించండి.", kn: "ಧ್ವನಿ ಸೇವೆಯನ್ನು ತಲುಪಲಾಗಲಿಲ್ಲ. ಇಂಟರ್ನೆಟ್ ಸಂಪರ್ಕ ಪರಿಶೀಲಿಸಿ ಅಥವಾ Google Chrome ಬಳಸಿ.", ml: "ശബ്ദ സേവനത്തിൽ എത്താനായില്ല. ഇന്റർനെറ്റ് കണക്ഷൻ പരിശോധിക്കുക അല്ലെങ്കിൽ Google Chrome ഉപയോഗിക്കുക.", hi: "वॉइस सेवा से संपर्क नहीं हो सका। इंटरनेट कनेक्शन जांचें या Google Chrome इस्तेमाल करें।" },
+  language: { en: "This browser does not support voice input in the selected language. Please type your question.", ta: "இந்த உலாவி தேர்ந்தெடுத்த மொழியில் குரல் உள்ளீட்டை ஆதரிக்கவில்லை. கேள்வியை தட்டச்சு செய்யவும்.", te: "ఈ బ్రౌజర్ ఎంచుకున్న భాషలో వాయిస్ ఇన్‌పుట్‌ను సపోర్ట్ చేయదు. ప్రశ్నను టైప్ చేయండి.", kn: "ಈ ಬ್ರೌಸರ್ ಆಯ್ದ ಭಾಷೆಯಲ್ಲಿ ಧ್ವನಿ ಇನ್‌ಪುಟ್ ಬೆಂಬಲಿಸುವುದಿಲ್ಲ. ಪ್ರಶ್ನೆಯನ್ನು ಟೈಪ್ ಮಾಡಿ.", ml: "ഈ ബ്രൗസർ തിരഞ്ഞെടുത്ത ഭാഷയിൽ ശബ്ദ ഇൻപുട്ട് പിന്തുണയ്ക്കുന്നില്ല. ചോദ്യം ടൈപ്പ് ചെയ്യുക.", hi: "यह ब्राउज़र चुनी हुई भाषा में वॉइस इनपुट का समर्थन नहीं करता। कृपया सवाल टाइप करें।" },
+  stopped: { en: "Voice input stopped working. Please try again, or type your question.", ta: "குரல் உள்ளீடு நின்றுவிட்டது. மீண்டும் முயற்சிக்கவும் அல்லது கேள்வியை தட்டச்சு செய்யவும்.", te: "వాయిస్ ఇన్‌పుట్ ఆగిపోయింది. మళ్లీ ప్రయత్నించండి లేదా ప్రశ్నను టైప్ చేయండి.", kn: "ಧ್ವನಿ ಇನ್‌ಪುಟ್ ನಿಂತುಹೋಯಿತು. ಮತ್ತೆ ಪ್ರಯತ್ನಿಸಿ ಅಥವಾ ಪ್ರಶ್ನೆಯನ್ನು ಟೈಪ್ ಮಾಡಿ.", ml: "ശബ്ദ ഇൻപുട്ട് നിലച്ചു. വീണ്ടും ശ്രമിക്കുക അല്ലെങ്കിൽ ചോദ്യം ടൈപ്പ് ചെയ്യുക.", hi: "वॉइस इनपुट बंद हो गया। फिर से प्रयास करें या सवाल टाइप करें।" },
+  insecure: { en: "Voice input only works on a secure (https) page. Open the app from its https link.", ta: "குரல் உள்ளீடு பாதுகாப்பான (https) பக்கத்தில் மட்டுமே வேலை செய்யும். https இணைப்பிலிருந்து திறக்கவும்.", te: "వాయిస్ ఇన్‌పుట్ సురక్షిత (https) పేజీలో మాత్రమే పనిచేస్తుంది. https లింక్ నుండి తెరవండి.", kn: "ಧ್ವನಿ ಇನ್‌ಪುಟ್ ಸುರಕ್ಷಿತ (https) ಪುಟದಲ್ಲಿ ಮಾತ್ರ ಕೆಲಸ ಮಾಡುತ್ತದೆ. https ಲಿಂಕ್‌ನಿಂದ ತೆರೆಯಿರಿ.", ml: "ശബ്ദ ഇൻപുട്ട് സുരക്ഷിത (https) പേജിൽ മാത്രമേ പ്രവർത്തിക്കൂ. https ലിങ്കിൽ നിന്ന് തുറക്കുക.", hi: "वॉइस इनपुट केवल सुरक्षित (https) पेज पर काम करता है। ऐप को https लिंक से खोलें।" },
+} satisfies Record<string, Localized>;
+
 interface SavedChatSession {
   id: string;
   title: string;
@@ -52,6 +61,11 @@ export default function ChatbotPage() {
   const { language, setLanguage } = useApp();
   const [messages, setMessages] = useState<ChatMessage[]>([createMessage("assistant", WELCOME[language] || WELCOME.en || "")]);
   const [isRecording, setIsRecording] = useState(false);
+  const [micNotice, setMicNotice] = useState<string | null>(null);
+  // Loop guard: counts recognition sessions that end at once without hearing anything
+  const sessionStartedAtRef = useRef(0);
+  const heardSpeechRef = useRef(false);
+  const quickEndsRef = useRef(0);
   const recognitionRef = useRef<SpeechRecognitionLike | null>(null);
   const [input, setInput] = useState("");
   const [isTyping, setIsTyping] = useState(false);
@@ -243,11 +257,21 @@ export default function ChatbotPage() {
     }
   }, []);
 
+  const failVoice = useCallback((message: string) => {
+    stopVoiceInput();
+    setMicNotice(message);
+  }, [stopVoiceInput]);
+
   const startRecognition = useCallback(() => {
     const speechWindow = window as unknown as { SpeechRecognition?: SpeechRecognitionCtor; webkitSpeechRecognition?: SpeechRecognitionCtor };
     const SpeechRecognition = speechWindow.SpeechRecognition || speechWindow.webkitSpeechRecognition;
+    // Browsers only give microphone access to https pages (and localhost)
+    if (!window.isSecureContext) {
+      failVoice(tr(language, MIC_TEXT.insecure));
+      return;
+    }
     if (!SpeechRecognition) {
-      alert(tr(language, { en: "Voice input is not supported in this browser. Please try Google Chrome or Microsoft Edge.", ta: "இந்த உலாவியில் குரல் உள்ளீடு ஆதரிக்கப்படவில்லை. Google Chrome அல்லது Microsoft Edge பயன்படுத்தவும்.", te: "ఈ బ్రౌజర్‌లో వాయిస్ ఇన్‌పుట్ పనిచేయదు. Google Chrome లేదా Microsoft Edge ప్రయత్నించండి.", kn: "ಈ ಬ್ರೌಸರ್‌ನಲ್ಲಿ ಧ್ವನಿ ಇನ್‌ಪುಟ್ ಬೆಂಬಲಿತವಾಗಿಲ್ಲ. Google Chrome ಅಥವಾ Microsoft Edge ಬಳಸಿ.", ml: "ഈ ബ്രൗസറിൽ ശബ്ദ ഇൻപുട്ട് പിന്തുണയ്ക്കുന്നില്ല. Google Chrome അല്ലെങ്കിൽ Microsoft Edge ഉപയോഗിക്കുക.", hi: "इस ब्राउज़र में वॉइस इनपुट समर्थित नहीं है। कृपया Google Chrome या Microsoft Edge आज़माएं।" }));
+      setMicNotice(tr(language, { en: "Voice input is not supported in this browser. Please try Google Chrome or Microsoft Edge.", ta: "இந்த உலாவியில் குரல் உள்ளீடு ஆதரிக்கப்படவில்லை. Google Chrome அல்லது Microsoft Edge பயன்படுத்தவும்.", te: "ఈ బ్రౌజర్‌లో వాయిస్ ఇన్‌పుట్ పనిచేయదు. Google Chrome లేదా Microsoft Edge ప్రయత్నించండి.", kn: "ಈ ಬ್ರೌಸರ್‌ನಲ್ಲಿ ಧ್ವನಿ ಇನ್‌ಪುಟ್ ಬೆಂಬಲಿತವಾಗಿಲ್ಲ. Google Chrome ಅಥವಾ Microsoft Edge ಬಳಸಿ.", ml: "ഈ ബ്രൗസറിൽ ശബ്ദ ഇൻപുട്ട് പിന്തുണയ്ക്കുന്നില്ല. Google Chrome അല്ലെങ്കിൽ Microsoft Edge ഉപയോഗിക്കുക.", hi: "इस ब्राउज़र में वॉइस इनपुट समर्थित नहीं है। कृपया Google Chrome या Microsoft Edge आज़माएं।" }));
       setIsRecording(false);
       isManuallyRecordingRef.current = false;
       return;
@@ -275,10 +299,14 @@ export default function ChatbotPage() {
       currentSessionFinalRef.current = "";
 
       recognition.onstart = () => {
+        sessionStartedAtRef.current = Date.now();
+        heardSpeechRef.current = false;
         setIsRecording(true);
       };
 
       recognition.onresult = (event) => {
+        heardSpeechRef.current = true;
+        quickEndsRef.current = 0;
         let interim = "";
         for (let i = event.resultIndex; i < event.results.length; ++i) {
           const item = event.results[i];
@@ -299,22 +327,42 @@ export default function ChatbotPage() {
 
       recognition.onerror = (event) => {
         console.warn("Speech recognition notice:", event.error);
-        if (event.error === "not-allowed" || event.error === "service-not-allowed") {
-          stopVoiceInput();
-          alert(tr(language, { en: "Microphone permission was denied. Please allow microphone access in your browser settings.", ta: "மைக்ரோஃபோன் அனுமதி மறுக்கப்பட்டது. உலாவி அமைப்புகளில் மைக்ரோஃபோனை அனுமதிக்கவும்.", te: "మైక్రోఫోన్ అనుమతి నిరాకరించబడింది. బ్రౌజర్ సెట్టింగ్‌లలో మైక్రోఫోన్‌ను అనుమతించండి.", kn: "ಮೈಕ್ರೊಫೋನ್ ಅನುಮತಿ ನಿರಾಕರಿಸಲಾಗಿದೆ. ಬ್ರೌಸರ್ ಸೆಟ್ಟಿಂಗ್‌ಗಳಲ್ಲಿ ಮೈಕ್ರೊಫೋನ್ ಅನುಮತಿಸಿ.", ml: "മൈക്രോഫോൺ അനുമതി നിരസിച്ചു. ബ്രൗസർ ക്രമീകരണങ്ങളിൽ മൈക്രോഫോൺ അനുവദിക്കുക.", hi: "माइक्रोफ़ोन की अनुमति नहीं मिली। कृपया ब्राउज़र सेटिंग्स में माइक्रोफ़ोन की अनुमति दें।" }));
-          return;
+        // "no-speech" and "aborted" are normal pauses; the session restarts on its own
+        switch (event.error) {
+          case "not-allowed":
+          case "service-not-allowed":
+            failVoice(tr(language, { en: "Microphone permission was denied. Please allow microphone access in your browser settings.", ta: "மைக்ரோஃபோன் அனுமதி மறுக்கப்பட்டது. உலாவி அமைப்புகளில் மைக்ரோஃபோனை அனுமதிக்கவும்.", te: "మైక్రోఫోన్ అనుమతి నిరాకరించబడింది. బ్రౌజర్ సెట్టింగ్‌లలో మైక్రోఫోన్‌ను అనుమతించండి.", kn: "ಮೈಕ್ರೊಫೋನ್ ಅನುಮತಿ ನಿರಾಕರಿಸಲಾಗಿದೆ. ಬ್ರೌಸರ್ ಸೆಟ್ಟಿಂಗ್‌ಗಳಲ್ಲಿ ಮೈಕ್ರೊಫೋನ್ ಅನುಮತಿಸಿ.", ml: "മൈക്രോഫോൺ അനുമതി നിരസിച്ചു. ബ്രൗസർ ക്രമീകരണങ്ങളിൽ മൈക്രോഫോൺ അനുവദിക്കുക.", hi: "माइक्रोफ़ोन की अनुमति नहीं मिली। कृपया ब्राउज़र सेटिंग्स में माइक्रोफ़ोन की अनुमति दें।" }));
+            break;
+          case "audio-capture":
+            failVoice(tr(language, MIC_TEXT.noMic));
+            break;
+          case "network":
+            failVoice(tr(language, MIC_TEXT.network));
+            break;
+          case "language-not-supported":
+            failVoice(tr(language, MIC_TEXT.language));
+            break;
         }
       };
 
       recognition.onend = () => {
         // If the user has NOT manually turned off the mic, keep it alive continuously!
         if (isManuallyRecordingRef.current) {
+          // A session that ends at once without hearing anything keeps failing: stop instead of
+          // restarting forever (which flickers the browser's microphone indicator)
+          const endedAtOnce = !heardSpeechRef.current && Date.now() - sessionStartedAtRef.current < 1500;
+          quickEndsRef.current = endedAtOnce ? quickEndsRef.current + 1 : 0;
+          if (quickEndsRef.current >= 4) {
+            quickEndsRef.current = 0;
+            failVoice(tr(language, MIC_TEXT.stopped));
+            return;
+          }
           if (restartTimeoutRef.current) clearTimeout(restartTimeoutRef.current);
           restartTimeoutRef.current = setTimeout(() => {
             if (isManuallyRecordingRef.current) {
               startRecognitionRef.current();
             }
-          }, 30);
+          }, 250);
         } else {
           setIsRecording(false);
         }
@@ -335,7 +383,7 @@ export default function ChatbotPage() {
         }, 150);
       }
     }
-  }, [selectedLang, stopVoiceInput, language]);
+  }, [selectedLang, failVoice, language]);
 
   useEffect(() => {
     startRecognitionRef.current = startRecognition;
@@ -361,6 +409,8 @@ export default function ChatbotPage() {
     } else {
       // User turned ON the mic
       stopSpeaking();
+      setMicNotice(null);
+      quickEndsRef.current = 0;
       isManuallyRecordingRef.current = true;
       accumulatedTranscriptRef.current = input ? input.trim() + " " : "";
       currentSessionFinalRef.current = "";
@@ -512,7 +562,7 @@ export default function ChatbotPage() {
             </div>
           </div>
           <div style={{ display: "flex", gap: 5, alignItems: "center", flexWrap: "wrap" }}>
-            <div style={{ display: "flex", gap: 3 }}>
+            <div style={{ display: "flex", gap: 3, flexWrap: "wrap" }}>
               {(Object.entries(LANG_LABELS) as [Language, string][]).map(([lang, label]) => (
                 <button key={lang} id={`lang-${lang}`} onClick={() => changeLang(lang)} style={{
                   padding: "4px 8px", borderRadius: 99, fontSize: 11, fontWeight: 600,
@@ -727,6 +777,13 @@ export default function ChatbotPage() {
                 )}
               </div>
             </div>
+          </div>
+        )}
+
+        {micNotice && (
+          <div role="alert" style={{ flexShrink: 0, background: "#FEE2E2", color: "#991B1B", borderTop: "1px solid #FCA5A5", padding: "8px 16px", fontSize: 12.5, fontWeight: 600, display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 10 }}>
+            <span>🎙️ {micNotice}</span>
+            <button onClick={() => setMicNotice(null)} aria-label="Dismiss" style={{ background: "none", border: "none", color: "#991B1B", cursor: "pointer", fontSize: 14, padding: 0 }}>✕</button>
           </div>
         )}
 
