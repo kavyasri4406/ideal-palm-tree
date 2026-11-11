@@ -1,6 +1,6 @@
 # AgriPredict – Complete Project Guide
 
-_Everything about the project — what each part does, **why** it exists and **how** it works — written for project reviews and the viva. Generated from the actual source code on 3 Nov 2026._
+_Everything about the project — what each part does, **why** it exists and **how** it works — written for project reviews and the viva. Generated from the source code on 3 Nov 2026 and **updated on 12 Nov 2026** for: the real Agmarknet-based forecast, browser-only login, the phone-sized frame, the rebuilt document scanner, rate limiting, tests and CI. `git log` shows the changes._
 
 ## Contents
 
@@ -34,7 +34,7 @@ _Everything about the project — what each part does, **why** it exists and **h
 | Farmer problem | What AgriPredict offers |
 |---|---|
 | Farmers don't know today's price at nearby APMC mandis, so middlemen can underpay them | A mandi price comparison using official Agmarknet (data.gov.in) prices when a key is set. Otherwise it shows estimates that are clearly labelled |
-| Hard to decide when to sell | Price history, a 30-day forecast and volatility views. **These are simulated estimates** and the README labels them that way |
+| Hard to decide when to sell | Official Agmarknet daily price history for the crop in the user's state, a 30-day forecast with an 80% range, and the forecast's own backtested error (see chapter 2, sections 4–5). Where a crop has no recent official data, a clearly labelled **simulated** series is shown instead. The volatility alerts and heatmap are still built-in sample data |
 | Weather risk | Live weather from Open-Meteo (`src/lib/weather.ts`), with a random fallback if the call fails |
 | Many farmers are not comfortable in English | The whole UI comes in 6 languages (English, Tamil, Telugu, Kannada, Malayalam, Hindi), plus a voice chatbot (AgriBot) |
 | Government schemes are hard to discover | A schemes portal (`src/app/schemes/page.tsx`) built on a hard-coded scheme dataset (`src/lib/governmentSchemesData.ts`) |
@@ -52,8 +52,10 @@ _Everything about the project — what each part does, **why** it exists and **h
 - `layout.tsx` sets the SEO metadata, links `/manifest.json`, sets the icons (`/icon.png`), the Apple web-app settings and the theme colour `#5C7A3E`. It then wraps every page in `<AppProvider>` (shared global state) and `<ClientLayout>`.
 - `ClientLayout` is the **login guard**. `/login` is the only public route (`PUBLIC = ["/login"]`). On any other route with no cached user, it calls `router.replace("/login")`. Until it knows, it shows a "Loading AgriPredict..." screen.
 - It uses `useSyncExternalStore` to know when the page is running in the browser. This avoids a "hydration mismatch", which is when the HTML from the server differs from the first browser render.
-- `syncSession()` from `auth.ts` re-renders the app when the Supabase session changes, for example when it expires or the user logs out in another tab.
+- `syncSession()` from `auth.ts` re-renders the app when the session changes. With Supabase configured it follows the Supabase session (for example when it expires or the user signs out in another tab). Without Supabase it keeps the browser-only session. See chapter 4.
 - It also renders the mobile top header (hamburger menu, logo, notification bell), the `Sidebar`, a dark backdrop for the mobile menu, and a global toast popup. The toast icon depends on its type: 💰 price, 🌦️ weather, 🔔 other.
+- **Phone frame:** every screen (including `/login`) is wrapped in a `PhoneFrame`: a 430 px column that fills the screen on a phone and appears as a centred "phone" on a laptop. The responsive CSS uses **container queries** on this frame (`.app-frame` in `globals.css`), so layouts follow the frame's width, not the browser window's.
+- **Install banner:** `InstallApp.tsx` shows an "Install AgriPredict" banner (the browser's install prompt on Android, "Share → Add to Home Screen" instructions on iPhone) and remembers if it was dismissed.
 
 ---
 
@@ -102,6 +104,8 @@ agripredict/
 ├─ public/                  Static files served as-is (icons, manifest, service worker, PDFs)
 ├─ supabase/schema.sql      Database tables and security rules
 ├─ scripts/                 Helper scripts (VAPID key generator, one-off scripts)
+├─ tests/                   Unit tests (Node's built-in test runner)
+├─ .github/workflows/       CI: lint, type check, tests, build
 ├─ data/                    Local push-subscription file (git-ignored)
 └─ config files             package.json, next.config.ts, tsconfig.json, eslint.config.mjs, postcss.config.mjs, .env.example
 ```
@@ -117,10 +121,10 @@ agripredict/
 | `crops/page.tsx` | Crop price list with category and season filters |
 | `crop/[name]/page.tsx` | Detail page for one crop (dynamic route): charts, factors, mandi comparison |
 | `my-crops/page.tsx` | The user's tracked crop portfolio |
-| `analytics/page.tsx` | Forecast and volatility charts. **Its own code comments say the model evaluation is "Simulated"** |
+| `analytics/page.tsx` | Price history, forecast accuracy (backtest) and heatmap/volatility panels. Official Agmarknet data when available, otherwise labelled simulation |
 | `chatbot/page.tsx` | AgriBot chat with voice input through the browser Web Speech API |
-| `schemes/page.tsx` | Government schemes portal (2,826 lines: schemes, alerts, nearby help centres) |
-| `tools/page.tsx` | Farmer tools (transport/arbitrage calculator, crop calendar, a **"Leaf scanner simulation"** for pests, weather risk) |
+| `schemes/page.tsx` | Government schemes portal (about 2,800 lines: schemes, alerts, nearby help centres). A search bar sits at the top of the page |
+| `tools/page.tsx` | Farmer tools (transport/arbitrage calculator, KCC, PM-KISAN, cost/profit, crop calendar, a **"Leaf scanner simulation"** for pests, weather risk) |
 | `documents/page.tsx` | Wraps the `DocumentOcr` component |
 | `settings/page.tsx` | Profile, avatar, language and location settings |
 | `favicon.ico` | Browser tab icon |
@@ -129,9 +133,10 @@ agripredict/
 
 | Route | What it does |
 |---|---|
-| `chat/route.ts` | `POST`: AgriBot answers through Groq. Tries `GROQ_TEXT_MODEL` (default `qwen/qwen3.8-27b`), then `openai/gpt-oss-20b`; uses an offline fallback otherwise. `maxDuration = 60` |
+| `chat/route.ts` | `POST`: AgriBot answers through Groq. Tries `GROQ_TEXT_MODEL` (default `qwen/qwen3.8-27b`), then `openai/gpt-oss-20b`; uses an offline fallback otherwise. Rate limited. `maxDuration = 60` |
 | `mandi-prices/route.ts` | `GET`: mandi prices. Agmarknet first, then a Groq AI estimate, then a model estimate based on each crop's base price |
-| `ocr/route.ts` | Document scanner: an image goes to the vision model, a PDF's extracted text goes to the text models. `maxDuration = 60` |
+| `price-history/route.ts` | `GET ?crop=&state=`: daily price history, 30-day forecast, fitted parameters and backtest metrics for a crop in a state (official Agmarknet history, else simulated). Rate limited |
+| `ocr/route.ts` | Document scanner: an image goes to the vision model, a PDF's extracted text goes to the text models. Returns English + the user's language; a separate `translate` action fills other languages on demand. Rate limited. `maxDuration = 60` |
 | `notifications/subscribe/route.ts` | `GET` VAPID public key, `POST` save a subscription, `DELETE` remove one |
 | `notifications/send/route.ts` | `POST` send a push, either to this device or broadcast to everyone with the admin token |
 
@@ -139,7 +144,8 @@ agripredict/
 
 | File | Purpose |
 |---|---|
-| `ClientLayout.tsx` | Login guard, mobile header, sidebar, toast |
+| `ClientLayout.tsx` | Login guard, phone frame, mobile header, sidebar, toast, install banner |
+| `InstallApp.tsx` | "Install AgriPredict" banner (Android prompt / iPhone instructions) |
 | `Sidebar.tsx` | Navigation menu (slides in on mobile) |
 | `NotificationManager.tsx` | Bell button: registers `/sw.js`, subscribes to push |
 | `PriceAlertModal.tsx` | Create price-threshold alerts |
@@ -151,7 +157,7 @@ agripredict/
 | `CropCalendar.tsx` | Sowing / harvest calendar with localized advisories |
 | `KccCalculator.tsx` | Kisan Credit Card loan calculator |
 | `PmKisanTracker.tsx` | PM-KISAN info. **Marked "DEMO ONLY"**: it never asks for Aadhaar and sends users to the official portal |
-| `DocumentOcr.tsx` | Upload UI. Shrinks images in the browser to at most 1200 px before upload |
+| `DocumentOcr.tsx` | Upload UI. Shrinks images in the browser to at most 1200 px before upload, sends the user's language, and translates other languages on demand |
 | `NearbyFarmerNetwork.tsx` | Small (84-line) nearby-farmers widget |
 
 **`src/lib`**
@@ -159,12 +165,16 @@ agripredict/
 | File | Purpose |
 |---|---|
 | `AppContext.tsx` | Global state: language, location, toast. Reverse-geocodes GPS coordinates through `api.bigdatacloud.net` |
-| `auth.ts` | Supabase login/register. Caches the profile in localStorage and writes changes to `profiles` |
+| `auth.ts` | Login/register. Supabase Auth when configured; otherwise browser-only accounts in localStorage (salted SHA-256 hash). Caches the profile in localStorage |
 | `supabase.ts` | Browser Supabase client (publishable key only). Returns `null` if not configured |
-| `groq.ts` | Minimal Groq client (`https://api.groq.com/openai/v1/chat/completions`), 30 s default timeout, `parseJsonReply()` |
+| `groq.ts` | Minimal Groq client (`https://api.groq.com/openai/v1/chat/completions`), 30 s default timeout, `parseJsonReply()`, `parseRetryAfter()` for rate-limit messages |
 | `agmarknet.ts` | data.gov.in client for official daily APMC prices (₹/quintal). 15 s timeout, in-memory cache of 1 hour per state |
+| `priceHistory.ts` | Server: fetches the daily history from the data.gov.in "Variety-wise Daily Market Prices" dataset (paged), turns records into one median price per day, caches per crop and state, and builds the series. Falls back to simulation |
+| `forecast.ts` | Pure functions: damped-trend Holt exponential smoothing on log prices, 80% prediction band, rolling-origin backtest (MAE, RMSE, MAPE, vs a "no change" guess), seeded simulation, gap filling |
+| `usePriceSeries.ts`, `priceSeriesLabels.ts` | Browser hook that loads `/api/price-history` (simulated series until it arrives) and the shared labels for the screens that show it |
+| `rateLimit.ts`, `apiGuard.ts`, `apiClient.ts` | In-memory per-IP rate limiter; API guards (rate limit and, when Supabase is configured, a signed-in check); the client helper that adds the sign-in header |
 | `priceDate.ts` | Formats Agmarknet's `dd/mm/yyyy` dates, and labels morning data as the previous day's |
-| `cropData.ts` | Hard-coded crop catalogue (prices, MSP, images, seasons). Comment: "Simulate live price with small random walk" |
+| `cropData.ts` | Hard-coded crop catalogue (prices, MSP, images, seasons), recommendation rules, calculators and sample data. The price-ticker is a simulated random walk (`getLivePrice`) |
 | `mandiDatabase.ts` | Hard-coded list of APMC mandis per district |
 | `locationData.ts` | States and districts with latitude/longitude |
 | `weather.ts` | Open-Meteo 7-day forecast. Falls back to random values on failure. The soil-moisture index is partly random |
@@ -182,6 +192,9 @@ agripredict/
 |---|---|
 | `public/manifest.json`, `icon.png` (512), `icon-192.png` | PWA install files |
 | `public/sw.js` | Service worker for push notifications |
+| `tests/` | 20 unit tests for the forecast model, record aggregation, rate limiter and Groq helpers (`npm test`, no extra packages) |
+| `.github/workflows/ci.yml` | GitHub Actions: `npm ci`, lint, type check, tests, build on every push and pull request |
+| `README.md` | Setup, scripts, forecasting method, API protection, phone layout and install instructions |
 | `public/*.pdf` | 3 architecture / feature guide PDFs (poster, overview, detailed guide) |
 | `public/*.svg` | Default Next.js template SVGs (`next.svg`, `vercel.svg` and so on), not part of the app |
 | `supabase/schema.sql` | Creates `profiles` and `push_subscriptions` with Row Level Security. Safe to re-run |
@@ -209,7 +222,7 @@ Copy `.env.example` to `.env.local` and fill in the values. `.gitignore` ignores
 | `VAPID_SUBJECT` | Contact email sent to push services | Defaults to `mailto:support@agripredict.in` |
 | `PUSH_ADMIN_TOKEN` (optional) | Broadcast to **all** subscribers using `Authorization: Bearer <token>` | Broadcast returns 401. Devices can still notify themselves |
 | `DATA_GOV_API_KEY` | Official Agmarknet daily mandi prices | Prices fall back to AI / model estimates, labelled "Estimated" |
-| `NEXT_PUBLIC_SUPABASE_URL` + `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` | **Required.** Login and user profiles | `getSupabase()` returns `null` and login shows "Login service is not configured. Please try again later." Since every page except `/login` needs a user, the app is effectively unusable |
+| `NEXT_PUBLIC_SUPABASE_URL` + `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` | **Optional.** Supabase login and per-user data | Without them login uses browser-only accounts on that device (see chapter 4) |
 | `SUPABASE_SECRET_KEY` | Server-only. Stores push subscriptions durably in Supabase | Subscriptions go to `data/push_subscriptions.json`, or to the temp folder on Vercel, plus memory. They are lost on serverless cold starts |
 
 What the `NEXT_PUBLIC_` prefix means: Next.js copies these values into the browser JavaScript. That is safe only for public values. Notes:
@@ -222,17 +235,19 @@ What the `NEXT_PUBLIC_` prefix means: Next.js copies these values into the brows
 
 ```bash
 npm install                    # install dependencies (Node >= 20.9.0)
-cp .env.example .env.local     # then fill in values; at least the Supabase pair
+cp .env.example .env.local     # then fill in the keys you have (all optional)
 npm run dev                    # dev server at http://localhost:3000
 npm run build                  # production build
 npm start                      # serve the production build
 npm run lint                   # ESLint
+npm run typecheck              # TypeScript check
+npm test                       # unit tests
 ```
 
 One-time setup:
 - Run `supabase/schema.sql` in the Supabase SQL Editor.
 - Generate push keys with `node scripts/gen_vapid.cjs`. It prints `PUBLIC_KEY=` and `PRIVATE_KEY=`.
-- Then open `/login` and register. Supabase uses email confirmation.
+- Then open `/login`. With Supabase, register (email confirmation is on). Without it, just enter an email and password: the first sign-in with a new email creates the account on that device.
 
 ---
 
@@ -305,9 +320,9 @@ A PWA (Progressive Web App) is a website that can be "installed" to the home scr
 
 ### Crop data and price intelligence (`src/lib/cropData.ts`, `src/lib/locationData.ts`, `src/lib/priceDate.ts`)
 
-`src/lib/cropData.ts` (1,365 lines) is the app's built-in crop database and its price "engine". It holds the static crop list and the functions that make simulated prices, history, forecasts, recommendations, mandi comparisons, risk scores and other tool data. It does not call any server or API. The only real market data in the app comes from the `/api/mandi-prices` route (Agmarknet). Some pages pull that real price in and use it to adjust the simulated numbers, as explained below.
+`src/lib/cropData.ts` is the app's built-in crop database and its rule engine. It holds the static crop list and the functions for the simulated price ticker, the Buy/Hold/Sell rules, mandi comparisons, risk scores and other tool data. It does not call any server or API. **Price history and the 30-day forecast no longer live here:** they come from `src/lib/priceHistory.ts` and `src/lib/forecast.ts` (sections 4–5 below), using official Agmarknet data. The other real market data is the mandi comparison from `/api/mandi-prices`.
 
-> **Be honest about this in the viva:** almost every number this file produces is **simulated with `Math.random()` or hard-coded**. The "forecast" and the "AI Recommendation" (the label used on the Crops page) are **not trained machine-learning models**. The forecast is a random walk (each day's price = yesterday's price + a small random step) with a small upward tilt. The recommendation is a short list of if/else rules. This is a working prototype of the user experience. It is not a real prediction system.
+> **Be honest about this in the viva:** the **price history and forecast are now real** wherever the crop has recent official data in the user's state (otherwise a labelled simulation is shown). The forecast is a classical statistical model (damped-trend exponential smoothing), **not** machine learning, and on volatile crops it is usually only about as accurate as guessing "no change" — the app shows that comparison openly. What is still simulated or hard-coded: the **price ticker** (`getLivePrice`), the **volatility and heatmap panels**, the portfolio graph, the nearby-farmer and PM-KISAN samples, the pest "scanner", and the Buy/Hold/Sell **rules** (fixed rules, not a trained model).
 
 ---
 
@@ -447,70 +462,51 @@ So **11 crops** have a support price (10 MSP plus the sugarcane FRP). The other 
 
 ---
 
-### 4. Price history generators (simulated)
+### 4. Price history from data.gov.in (`src/lib/priceHistory.ts`, route `/api/price-history`)
 
-#### `generatePriceHistory(crop, days = 60)`
-Used by the Crops page (default 60 days) and the Analytics page (`src/app/analytics/page.tsx`, where `days` is the timeframe chosen by the user).
-- It loops `i = days … 0`, which gives **days + 1 points**, one per calendar day ending today.
-- It starts at `basePrice` and adds a step each day:
-  ```ts
-  change = (Math.random() - 0.48) * (basePrice * 0.028)   // about ±1.4% per day, slight upward bias
-  price  = clamp(price + change, 0.70 * basePrice, 1.40 * basePrice)
-  ```
-- `volume` is a random number from 7,000 to 12,999. `weather` is a random pick from Sunny, Cloudy, Rainy, Partly Cloudy and Foggy. **Both are for display only and are not real data.**
-- The date label is `"dd Mon"` in the en-IN format.
+**What:** daily prices for one crop in one state, taken from Agmarknet's "Variety-wise Daily Market Prices Data of Commodity" dataset on data.gov.in (₹ per quintal).
 
-#### `generatePriceHistoryByTimeframe(crop, "1M" | "3M" | "1Y")`
-Used by the crop detail page and `src/components/PortfolioPerformanceGraph.tsx` (1M).
+**Why:** a forecast must be built on real past prices. The earlier version drew random numbers around a fixed reference price, which a viva examiner could not accept as "prediction".
 
-| Timeframe | Days back | Step (days) | Points |
-|---|---|---|---|
-| 1M | 30 | 1 | 31 |
-| 3M | 90 | 2 | 46 |
-| 1Y | 365 | 5 | 74 |
+**How:**
+1. **Request.** `GET /api/price-history?crop=<id>&state=<state>`. The route is rate limited per IP. Only crops priced per quintal and listed in `COMMODITY_NAMES` (`agmarknet.ts`) are eligible, and `DATA_GOV_API_KEY` must be set.
+2. **Fetching.** The data.gov.in API returns the newest rows first (`sort[Arrival_Date]=desc`) and is filtered by `State` and `Commodity`. One page is 5,000 rows. In states with hundreds of mandis a page covers only a few weeks, so when a page is full and holds fewer than 120 distinct days, up to 4 older pages are fetched in parallel (at most 5 pages). A failed older page only shortens the history.
+3. **One price per day.** `aggregateDaily` takes the **median modal price across all mandis that reported that day** and counts the mandis. Rows with a bad date, a price of 0 or less, or a future date are skipped, and history is limited to the last 365 days.
+4. **Name and state matching.** For each commodity name (for example "Paddy(Common)" for rice) and each state spelling (for example "Keralam" for Kerala) it tries until one gives usable data. Usable means at least **45 days** of history whose last day is within **14 days** of today.
+5. **Fallback.** If nothing is usable (no key, wrong unit, or a crop that is out of season in that state, such as wheat in some states), it returns a **simulated** series marked `source: "simulated"`. The screens say so.
+6. **Caching.** Each crop and state is cached in server memory for 6 hours (30 minutes when only the simulation was possible, so a later retry can succeed).
 
-Each point is calculated like this:
-```ts
-seasonalFactor = Math.sin((month / 12) * 2π) * 0.05
-noise          = (Math.random() - 0.48) * (basePrice * 0.035)      // about ±1.75%
-price          = price * (1 + seasonalFactor * 0.05) + noise
-price          = clamp(price, 0.68 * basePrice, 1.42 * basePrice)
-```
-- The "seasonal" term is very small: at most ±0.25% per step (0.05 × 0.05). It does not represent a real harvest cycle. It only adds a slight wave.
-- 1Y labels use `"Mon YY"`. The others use `"dd Mon"`.
-- Each call gives different random numbers. The crop page wraps it in `useMemo`, so the chart only regenerates when the crop or the timeframe changes.
+**Honest notes:**
+- The history is a state-level median, not the price at the farmer's own mandi.
+- Days with no reports are filled by straight-line interpolation before modelling.
+- The `/api/mandi-prices` route (today's prices per mandi) and this one use different data.gov.in datasets.
 
 ---
 
-### 5. `generateForecast(crop, lastPrice, days = 30)`: random-walk "forecast"
+### 5. The forecasting model (`src/lib/forecast.ts`)
 
-**What:** produces 30 future daily points, each with a `predicted` value and a `lower`/`upper` band.
+**What:** a 30-day forecast with an 80% range, plus a measured error, for any daily price series.
 
-**Why:** to show farmers what a price-outlook chart with an uncertainty band would look like.
+**Why:** to give farmers an outlook that is built on data and that states how wrong it has been.
 
-**How (exact formula):**
-```ts
-trend = (Math.random() - 0.44) * 0.004            // chosen ONCE per forecast: −0.176%…+0.224% per day
-for i = 1..30:
-  noise     = (Math.random() - 0.5) * (basePrice * 0.022)   // about ±1.1% of base
-  price     = price * (1 + trend) + noise
-  price     = clamp(price, 0.65 * basePrice, 1.55 * basePrice)
-  margin    = basePrice * 0.035 * (1 + i * 0.018)
-  lower     = price − margin,  upper = price + margin
-```
-- It starts from `lastPrice`, which is the last point of the simulated history.
-- The trend is chosen once and stays the same for all 30 days, so the forecast leans either up or down overall. Over 30 days it adds about −5% to +7%. Because 0.44 is less than 0.5, upward forecasts are slightly more likely.
-- The band widens with time: about ±3.6% of `basePrice` on day 1 and ±5.4% on day 30 (`0.035 × 1.54`). The band edges are not clamped.
-- **This is not a trained model.** It learns nothing from past data, weather or arrivals. It is a random walk built from fixed constants.
+**How (all pure functions, no libraries):**
+1. **Model: damped-trend Holt exponential smoothing**, fitted to the **logarithm** of the price.
+   - It keeps a *level* (where the price is) and a *trend* (how fast it is moving). Each day both are updated from the newest price. The trend is *damped* by a factor φ, so the forecast flattens out instead of running away.
+   - Using logs makes errors proportional (a ₹100 swing matters more on a ₹1,000 crop than on a ₹5,000 crop) and keeps the forecast and band above zero.
+2. **Fitting.** Three settings are chosen by trying every combination on a grid and keeping the one with the smallest one-day-ahead squared error: level smoothing α ∈ {0.1 … 0.9}, trend smoothing β ∈ {0, 0.05, 0.1, 0.2, 0.3} and damping φ ∈ {0.8, 0.9, 0.95}. The starting trend is the average slope of the first 5 days.
+3. **Range.** The spread of the one-day-ahead errors gives σ. The error for day *h* grows with *h* (the usual Holt variance formula), and the band is ±1.2816σ in log space (an **80% prediction interval**), converted back to rupees. The band therefore widens over time and is not symmetrical.
+4. **Backtest (how accurate has it been?).** `backtest` hides the last 14 days, forecasts them from the earlier data only, and compares with what really happened; then it repeats for the 14 days before that, up to 4 times (needs at least 30 training days). It reports **MAE** and **RMSE** (₹), **MAPE** (average % error), R², and the **MAPE of the "no change" guess** (tomorrow = today) on the same days. A unit test checks that the model never trains on the days it is scored on.
+5. **Simulation for missing data.** `simulateHistory` makes a mean-reverting random walk around the crop's reference price. It uses a **seeded** random generator (mulberry32 seeded by the crop id), so the same crop always gives the same series (earlier versions changed on every reload).
 
-#### How the crop page anchors it to the real price (`src/app/crop/[name]/page.tsx`)
-1. The page calls `/api/mandi-prices?crop=…&state=…&district=…` for the user's saved location. It accepts the answer only if `live === true` and `wholesaleMandiRateQuintal` is a positive number. The answer is stored together with a `crop|state|district` key, so an old answer for a different crop or place is ignored.
-2. It builds the simulated history and forecast (`useMemo` on crop and timeframe).
-3. If a live price exists, it computes the scale factor `k = livePrice / lastSimulatedPrice`. Every history point and every forecast `predicted`/`lower`/`upper` value is multiplied by `k`, and the last history point is set exactly to the live price. The chart keeps its simulated shape but now sits at the real price level.
-4. `getRecommendation` runs on these rescaled numbers.
-5. The chart caption says plainly: "Estimated trend (simulated) — … history + 30d projection with band", plus ", anchored to today's Agmarknet price" when the live price was used. If no live price arrives, the chart stays purely simulated around `basePrice`.
+**What the backtest showed on 12 Nov 2026** (examples, they change with the data): rice in Tamil Nadu about 11% average error against 12% for "no change"; tomato in Tamil Nadu about 9.8% against 9.3%; onion in Maharashtra about 5–7% against a similar figure. The forecast is useful as a range and a direction, but on volatile vegetables it does not beat "no change" by much. **Say this in the viva before being asked.**
 
-The Crops list page (`src/app/crops/page.tsx`) does **not** do this anchoring. It uses plain `generatePriceHistory` and `generateForecast`.
+#### How the screens use it
+- **Crop detail (`/crop/[name]`)** and **Analytics** call `usePriceSeries(crop, state)`. It shows a simulated series immediately, then switches to the official one when `/api/price-history` answers.
+  - Official: the caption reads "Official Agmarknet daily prices (state · state median)", the chart legend says "Agmarknet price / Forecast", and the table shows "Mandis reporting" instead of the old random volume and weather columns.
+  - Simulated: the caption says so, the series is rescaled so its last point equals today's official mandi price when that exists (`k = livePrice / lastPoint`), and the old "Est." labels are used.
+- **Analytics "Model Accuracy" cards** show MAE, RMSE and MAPE (with the "no change" figure) from the backtest of whichever series is displayed, labelled "backtest on Agmarknet prices" or "backtest on simulated prices". They replace the earlier made-up "MAE/MSE/R² (simulated demo metrics)".
+- **Crops list** builds its Buy/Hold/Sell card from the same series, so the two pages agree.
+- **My Crops portfolio graph** still uses a 30-day deterministic simulation (`simulateHistory`), labelled as an estimate.
 
 ---
 
@@ -533,11 +529,11 @@ The Crops list page (`src/app/crops/page.tsx`) does **not** do this anchoring. I
 | 2 | `priceChange > 5` (trend down) | HOLD ("hold and watch") | `min(80, 60 + |Δ|)`, range 65–80 |
 | 3 | `priceChange < −5` | **SELL** | `min(88, 65 + 1.5·|Δ|)`, range 72.5–88 |
 | 4 | `msp > 0` and `currentPrice < 0.95 × msp` | HOLD ("below MSP, wait for govt procurement") | fixed 75 |
-| 5 | otherwise | HOLD ("market stable, monitor 2 weeks") | **random** 60–79 |
+| 5 | otherwise | HOLD ("market stable, monitor 2 weeks") | **fixed 65** |
 
 - **BUY is never returned.** It exists in the TypeScript type, and the Crops page has a label for it, but no rule produces it. This makes sense because farmers are sellers.
 - The MSP rule (rule 4) is only reached when the forecast change is within ±5%.
-- The "confidence" value is a formula on the forecast change (and in rule 5 it is random). It is **not a statistical probability**.
+- The "confidence" value is a formula on the forecast change (a fixed 65 in rule 5, no longer random). It is **not a statistical probability**.
 - Reasons are written in EN, TA and TE inside this function. `recReason()` in `src/app/crops/page.tsx` adds KN, ML and HI text by checking which rule fired.
 - The Crops page labels this result "AI Recommendation". In reality it is rule-based logic.
 
@@ -1000,8 +996,8 @@ All of these labels are translated into English, Tamil, Telugu, Kannada, Malayal
 - It fetches the same API for the user's saved state and district, and accepts the result **only if `live === true`** and `wholesaleMandiRateQuintal` is a positive number. The quote is also checked against a key (`crop|state|district`), and the fetch is cancelled (`AbortController`) when the page changes.
 - With a live quote:
   - "Current price" = the official average of up to 8 mandis. The label reads **"Agmarknet · Today · avg mandi"** (with the date text from `formatPriceDate`).
-  - The **simulated** price history and forecast are **scaled** by `k = livePrice / lastSimulatedPrice`, so the chart ends exactly at the real price. **Honest note:** only the last history point is real. The shape of the past history and the forecast is still simulated, just shifted to the real level.
-- Without a live quote, the label is **"Estimated"** and the price is the last point of the simulated series.
+  - If the history is the official series it is used as it is (it already ends at real prices). Only a **simulated** fallback series is **scaled** by `k = livePrice / lastPoint` so its last point equals the real price.
+- Without a live quote, the label is **"Estimated"** (or "Agmarknet · state median" when the official history is shown).
 
 ---
 
@@ -1033,6 +1029,9 @@ All of these labels are translated into English, Tamil, Telugu, Kannada, Malayal
 ## 4. Login, database & security
 
 ### User accounts, database and security
+
+> **Update (12 Nov 2026): two login modes.** (1) With `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` set, everything below applies (Supabase Auth, `profiles` table, RLS). (2) **Without them, login uses browser-only accounts:** the first sign-in with a new email creates the account on that device, later sign-ins must use the same password, and a wrong password is refused. Passwords are stored as a **salted SHA-256 hash** (`crypto.subtle`; a simple hash on plain-http LAN addresses) in `localStorage` key `agri_local_users`; profile changes (location, portfolio, avatar) are saved there too. Local accounts exist **only in that browser**: they do not sync between devices and are lost if site data is cleared, and the server cannot verify them, so `/api/chat` and `/api/ocr` are protected by the rate limit only. The project was switched to this mode because the original Supabase project was no longer reachable. Local user ids start with `local_`, so a Supabase session and a local one are never confused.
+
 
 This section covers how farmers sign up and log in, where their data is kept, and how the app keeps that data private.
 
@@ -1442,6 +1441,7 @@ Transliterated text such as "paddy rate eshtu ide" is written in English letters
 | **Language buttons** | Six chips. `changeLang` sets the page language **and** the global app language (`setLanguage` from `AppContext`). |
 | **Auto language switch** | When sending, `detectLanguage(text)` runs. If the message is in an Indian script, that language is used for this reply and becomes the selected language. English-letter text keeps the selected language. |
 | **Quick prompts** | A scrollable row of buttons from `QUICK_PROMPTS[lang]`. Tapping one sends it immediately. |
+| **Voice input errors** | Instead of failing silently the page shows a red message above the input for: permission denied, no microphone found (`audio-capture`), speech service unreachable (`network`), language not supported, and pages that are not https (browsers only give the microphone to https pages and localhost). Normal pauses (`no-speech`, `aborted`) restart quietly (after 250 ms). If recognition ends within 1.5 s without hearing anything 4 times in a row, it stops with a message instead of restarting forever. Not tested with a real voice in the development preview, which blocks the microphone. |
 | **Sending** | `POST /api/chat` with `{message, history, language}`. If the HTTP request fails or returns no `response`, it calls `getChatbotResponse` locally in the browser. A "AgriBot is typing..." indicator shows while waiting. New messages scroll into view automatically. |
 | **Voice input (Web Speech API)** | Uses `SpeechRecognition` / `webkitSpeechRecognition`, which is built into Chrome and Edge. Settings: `continuous = true`, `interimResults = true`, locale `en-IN`/`ta-IN`/`te-IN`/`kn-IN`/`ml-IN`/`hi-IN`. Finished phrases are added up in a ref, and live partial words are shown in the input box. |
 | **Keeping the mic alive** | Browsers stop recognition after silence. If the user has not pressed stop, `onend` restarts it after **30 ms** (after **150 ms** if starting it threw an error). A red bar shows "Mic Active", lets the user switch the recognition language while speaking, and has "Stop Mic" and "Send Voice ✓" buttons. Permission errors (`not-allowed`) stop the mic and show an alert. The mic is also stopped when leaving the page. |
@@ -1460,74 +1460,56 @@ Transliterated text such as "paddy rate eshtu ide" is written in English letters
 
 ### 5. Document Scanner server route (`src/app/api/ocr/route.ts`)
 
-**What:** `POST /api/ocr` takes an image or PDF, or a sample-document name, and returns a structured explanation in 6 languages. `GET /api/ocr` is a health check that returns `{status: "ok", service, sample}` with a fallback example.
+**What:** `POST /api/ocr` takes an image or PDF, or a sample-document name, and returns a structured explanation in **English plus the user's language**. A second action, `translate`, writes the other languages on demand. `GET /api/ocr` is a health check returning `{status, service}`.
 
 OCR stands for "optical character recognition", which means reading text from an image.
 
-**Why:** Farmers receive letters and forms (KCC loan sanction letters, PMFBY insurance documents, soil health cards, land records) written in formal English or another language they may not read well. The scanner explains *what the document is, how to use it, a summary, and action steps* in their own language.
+**Why:** Farmers receive letters and forms (KCC loan sanction letters, PMFBY insurance documents, soil health cards, land records) written in formal English or another language they may not read well. The scanner explains *what the document is* and *what to do about it*.
+
+**Why not all six languages at once (the rebuilt design):** the first version asked the model for all six languages in one reply (several thousand tokens of Indian-script text). Groq's free tier allows only about **1,000 output tokens per minute** on the one model that can read images, so scans failed with HTTP 429 and the screen then showed made-up filler text. Now a scan asks only for English plus the app language (about a third of the output; about 3 s in testing against 7 s), and the other four languages are translated when the user opens that tab, by a text model (`openai/gpt-oss-20b` first, which has a much larger per-minute allowance).
 
 **How:**
 
 #### 5.1 Accepted inputs
-1. **`multipart/form-data` with a `file`** (a real upload):
-   - The type is worked out from the file extension or MIME type: `.pdf` → `application/pdf`, `.jpg/.jpeg` → `image/jpeg`, `.webp`, `.png`. Anything else keeps its own `file.type`, or `image/png` if it has none.
-   - The file name is cut to 200 characters.
-2. **`application/json` with `{ demoKey, fileName }`** (the sample buttons):
-   - **Honest note:** no real document is sent here. The model receives only a sentence such as *"Analyze document: kcc_loan…"*. So the "result" is the AI **writing a plausible description from the name alone**. It is a demonstration, not a real scan.
+1. **`multipart/form-data` with a `file` and a `language` field** (a real upload). The type comes from the extension or MIME type. Supported images: JPEG, PNG, WEBP, GIF. Anything else (for example iPhone HEIC) gets **HTTP 415** with a clear message. The file name is cut to 200 characters.
+2. **`application/json` with `{ demoKey, fileName, language }`** (the sample buttons). **Honest note:** no real document is sent. The model receives only a sentence such as *"Analyze this sample government document: kcc_loan…"*, so the result is the AI **writing a plausible description from the name alone**. It is a demonstration.
+3. **`application/json` with `{ action: "translate", to, fields }`**: translates the English `whatIsThis`, `howToUse`, `summary` and `actionItems` into one language and returns `{ translated }`.
 
 #### 5.2 Size limits and why
 
 | Kind | Limit | Constant | Reason in code |
 |---|---|---|---|
-| Image | 3,000,000 bytes (about 3 MB) | `MAX_IMAGE_BYTES` | Groq accepts base64 images up to 4 MB. Base64 (a way of writing binary data as text) is about 33% larger than the raw file, so 3 MB raw becomes about 4 MB. |
+| Image | 3,000,000 bytes (about 3 MB) | `MAX_IMAGE_BYTES` | Groq accepts base64 images up to 4 MB. Base64 is about 33% larger than the raw file, so 3 MB raw becomes about 4 MB. |
 | PDF | 4 × 1024 × 1024 bytes (4 MiB) | `MAX_UPLOAD_BYTES` | Serverless hosts limit request bodies (about 4.5 MB on Vercel). A PDF is reduced to text, so the Groq image limit does not apply. |
 
 A file that is too large gets **HTTP 413** with a message such as "File is too large (5.2 MB). Please upload an image under 3 MB."
 
 #### 5.3 PDF text handling (simple, and weak)
-`extractTextFromFileBuffer` does **not** use a real PDF parser:
-- it reads the raw bytes as UTF-8 text;
-- it uses a regular expression to find runs of 3–100 ordinary characters (letters, digits, `, . - : /` and spaces);
-- it drops pieces that contain `stream`, `endstream`, `obj` or `PDF-`;
-- it keeps the first **80** pieces.
+`extractTextFromFileBuffer` does **not** use a real PDF parser: it reads the raw bytes as UTF-8, keeps runs of 3–100 ordinary characters, drops pieces containing `stream`, `endstream`, `obj` or `PDF-`, and keeps the first **80**. If the result is longer than 10 characters it is added to the prompt.
+- **Honest limitation:** most real PDFs store their text compressed, so this often recovers internal PDF codes. Scanned PDFs (just images) contain no text, so the model reports "no readable text". **Photos and PDFs with a real text layer work best.**
+- The same extraction also runs on **image** files, so random readable fragments from the image bytes can end up in the prompt.
 
-If the result is longer than 10 characters, it is added to the prompt.
-- **Honest limitation:** most real PDFs store their text compressed, so this often recovers internal PDF codes rather than the visible words. Scanned PDFs, which are just images, contain no text at all. PDFs are **not** sent to the vision model, so PDF results may be based on very little real content.
-- The same extraction also runs on **image** files. Random readable fragments from the image bytes can end up in the prompt as well.
-
-#### 5.4 Vision vs text models
-- **Images:** sent as a `data:<mime>;base64,…` `image_url` content part to **one** vision model (`GROQ_VISION_MODEL`, default `qwen/qwen3.8-27b`). There is no second model to try.
-- **PDFs and samples:** text only, sent to `GROQ_TEXT_MODELS` in order (primary, then `openai/gpt-oss-20b`).
-- **Call settings:** `temperature 0.1` (very low, for consistent output), `maxTokens 6000` (the comment says the 6-language reply needs about 4,000 tokens and a lower limit cuts the JSON off), and JSON mode on.
-- **Timing:** `maxDuration = 60`, `deadline = now + 55 s`. A model is skipped if less than 5 s remain. A model that is not the last one gets at most 35 s, so the next model still has time.
-- If a reply cannot be parsed as JSON, the code logs it and tries the next model.
+#### 5.4 Vision vs text models, limits and retries
+- **Images:** a `data:<mime>;base64,…` `image_url` part to **one** vision model (`GROQ_VISION_MODEL`, default `qwen/qwen3.8-27b`). It is the only model on the project's Groq account that can read images.
+- **PDFs and samples:** text only, to `GROQ_TEXT_MODELS` in order (primary, then `openai/gpt-oss-20b`).
+- **Call settings:** `temperature 0.1`, `maxTokens 2500`, JSON mode on. The prompt (`buildOcrPrompt`) lists only the requested languages and asks for short answers (2 sentences, 2–3 sentences, 3–4 sentences, 3 steps).
+- **Rate limits (HTTP 429):** `parseRetryAfter` reads Groq's "try again in 45.48s" message. A wait of **15 s or less** is waited out once and retried; a longer wait moves to the next model, and if every model is limited the route returns **HTTP 429** with `{ error: "The AI scanner is busy right now… try again in about N seconds", retryAfterSeconds }` and a `Retry-After` header.
+- **Timing:** `maxDuration = 60`, `deadline = now + 55 s`; a model is skipped if less than 5 s remain, and a non-last model gets at most 35 s.
+- A reply that is not valid JSON is logged and the next model is tried.
 
 #### 5.5 JSON output shape
-The prompt asks for one JSON object containing:
-- 4 header fields: `documentType`, `extractedTitle`, `extractedDate`, `issuerAuthority`;
-- 4 content groups, each in 6 languages (suffix `EN/TA/TE/KN/ML/HI`):
-  - `whatIsThis…`: 2-sentence explanation
-  - `howToUse…`: how to use the information
-  - `summary…`: full plain summary
-  - `actionItems…`: an array of 4 steps
+Header fields: `documentType`, `extractedTitle`, `extractedDate`, `issuerAuthority`. For each requested language (suffix `EN`, `TA`, …): `whatIsThis…`, `howToUse…`, `summary…`, `actionItems…`.
 
-`normalizeOcrResult` then cleans up the model's answer:
-- It accepts other key names the model might use (`document_type`, `title`, `issuing_authority.name`, `summary.text`, `action_items`, …).
-- It fills in defaults for anything missing: today's date, "Document Issuing Entity", the file name as the title, and generic English action items.
-- Missing regional-language text is filled from `generateLanguageFallbacks`. These are fixed **generic** sentences that include the file name. They are not real translations of the document.
-- A regional summary is **rejected** if it contains the English summary (a sign that the model copied English instead of translating). The generic fallback is used instead.
-- One special case exists: when "AI" appears together with "partner" or "infographic" in the name, type or title, it uses special text describing an "AI Agriculture Partner" infographic. This looks like it was written for a specific demo image.
+`normalizeOcrResult` accepts other key names the model might use (`document_type`, `title`, `issuing_authority.name`, `summary.text`, `action_items`, …), fills missing English fields with sensible defaults, and sets, for every language that was **not** generated, the **English text** (no invented filler). It adds `languages: ["en", "ta", …]`, the list of languages the model actually wrote, which the screen uses to decide when to translate. Older saved scans without this field are treated as complete.
 
-The response is `{ result, mode: "⚡ Groq Vision AI (<model>)" }`. **Note:** this label says "Vision" even when a text model handled a PDF or sample.
+The response is `{ result, mode: "⚡ Groq Vision AI (<model>)" }`. **Note:** the label says "Vision" even when a text model handled a PDF or sample.
 
-#### 5.6 "AI unavailable" fallback (returns HTTP 200)
-If Groq fails, returns no usable JSON, the body is not a file, or any error is thrown, the route calls `generateSmartDynamicResult(fileName)`:
-- `documentType`: "Agricultural Document / File";
-- the title is made from the file name ("kcc_loan.pdf" becomes "Kcc Loan");
-- the English text says plainly that *AI analysis is unavailable … could not be read* and suggests trying again or visiting a Krishi Vigyan Kendra (government farm science centre);
-- `mode: "dynamic-smart-ocr"`.
+#### 5.6 Failures are now honest (HTTP 4xx/5xx)
+The earlier "AI unavailable" fallback (a generated card with HTTP 200) was **removed**. A failed scan now returns an error status with a message, and the screen shows it in a red box: 429 (busy, retry in N s), 503 (unavailable), 502 (unreadable reply), 413 (too large), 415 (unsupported image), 400 (no file). Showing made-up text for a real document was misleading.
 
-This is returned with **status 200**, not an error code. The browser can then show a readable card, and the UI marks it clearly as "basic only". Only the size check (413) returns an error status.
+#### 5.7 Rate limiting and sign-in checks (`src/lib/apiGuard.ts`, `src/lib/rateLimit.ts`)
+- `/api/chat` (20 requests per minute per IP), `/api/ocr` (12), `/api/mandi-prices` (40) and `/api/price-history` (40) are rate limited by a fixed-window limiter kept in server memory (bounded to 5,000 tracked IPs). On serverless hosting each warm instance counts separately, so this caps abuse rather than enforcing an exact quota. Over the limit: **HTTP 429** with `Retry-After`.
+- When Supabase is configured, `/api/chat` and `/api/ocr` also require a valid `Authorization: Bearer <access token>` (checked against Supabase, cached for 5 minutes). With browser-only accounts there is nothing for the server to verify, so only the rate limit applies.
 
 ---
 
@@ -1542,18 +1524,18 @@ This is returned with **status 200**, not an error code. The browser can then sh
 | **Upload** | Click the dashed box or drag and drop a file. The input accepts `image/*,.pdf`. |
 | **Image compression in the browser** | `compressImageIfNeeded` draws the image on a `<canvas>`, scales the longer side down to **1200 px**, and re-saves it as **JPEG at quality 0.85**. **Why:** it makes uploads smaller and faster on slow rural networks and keeps images under the 3 MB server limit. PDFs are sent unchanged. |
 | **Timeout** | Uploads are cancelled after **90 s** (`AbortController`). The user sees "The scan took too long…". Sample-document requests have no client timeout. |
-| **Sample documents** | 8 buttons: PM-KISAN e-KYC, KCC Loan Sanction, PMFBY Crop Insurance, MSP Procurement, Soil Health Card, Drip Subsidy (PMKSY), Land Chitta/Patta, Agricultural Passbook. They send `{demoKey, fileName}` as JSON, so the result is generated from the name only (see 5.1). |
+| **Sample documents** | 8 buttons: PM-KISAN e-KYC, KCC Loan Sanction, PMFBY Crop Insurance, MSP Procurement, Soil Health Card, Drip Subsidy (PMKSY), Land Chitta/Patta, Agricultural Passbook. They send `{demoKey, fileName, language}` as JSON, so the result is generated from the name only (see 5.1). |
 | **Loading state** | "Analyzing File with Groq Vision AI…" with the file name. |
 | **Result card** | Shows the document type, a mode badge, title, issuer and date, then 4 boxes: *What is this file?*, *How to use this for your farm*, *Detailed summary*, and a numbered list of *Action items*. |
-| **Summary language tabs** | EN / தமிழ் / తెలుగు / ಕನ್ನಡ / മലയാളം / हिंदी. The default is the app language. Each box shows that language's field, or the English version if that field is empty. |
-| **Mode badge** | If `mode` is `dynamic-smart-ocr` or missing, it shows *"Basic summary only — AI unavailable, the document's text was not read"* (translated into all 6 languages). This is an honest warning to the user. |
+| **Summary language tabs** | EN / தமிழ் / తెలుగు / ಕನ್ನಡ / മലയാളം / हिंदी. The default is the app language. If a tab's language was not generated by the scan (`languages` does not include it), opening it sends the `translate` action; a "Translating…" line shows meanwhile, the text is merged into the result and saved to history, and a failure shows a message and keeps the English text. |
+| **Mode badge** | Shows which model produced the result. (The old "Basic summary only — AI unavailable" card no longer appears for new scans, because failures now return an error instead.) |
 | **History** | Saved in `localStorage` key `agri_ocr_history`. It keeps up to **20** items, newest first, and replaces an older item with the same file name. Each item stores the full result, so clicking it reopens the result without calling the server again. There is a "Clear History" button. If storage is full or blocked, history stays in memory only. Old items with no saved mode are labelled "⚡ Groq Vision AI (qwen/qwen3.8-27b)". |
-| **Errors** | Shows a red alert box for 413 (file too large) messages, failed scans and network errors. |
+| **Errors** | A red alert shows the server's message for 413, 415, 429 (busy, try again in N seconds) and 503, plus timeouts and network errors. |
 
 **Honest notes on the scanner:**
 - The header says the AI "extracts exact text". In fact, the raw extracted text is **never shown**. The user only sees AI-written summaries and explanations.
 - The heading calls it a "Legal Decoder", but no legal checking is done.
-- Everything depends on one cloud AI. If the key is missing or Groq is down, the user only gets the generic fallback card.
+- Everything depends on one cloud AI and on Groq's per-minute allowance. If the key is missing, Groq is down or the allowance is used up, the user gets a clear error (no fake result). Roughly **one scan a minute** is realistic on the free tier, and chat shares the same model's allowance.
 
 ---
 
@@ -1952,7 +1934,7 @@ The header has three view tabs (**All Crops**, **Mandi Comparison**, **Crop Vari
 
 **How the AI Recommendation card works** (`getRecommendation` in `src/lib/cropData.ts`):
 
-1. It builds 60 days of simulated price history (`generatePriceHistory`) and a 30‑day forecast (`generateForecast`).
+1. It takes the price series for the selected crop in the user's state from `usePriceSeries` (official Agmarknet history and forecast, or the labelled simulation) and passes its history and 30‑day forecast to the rules.
 2. It computes `priceChange% = (last forecast − current) / current × 100` and checks whether the 7‑day average is above the 30‑day average (that means the trend is "up").
 3. It applies these rules:
    - If the change is above +5% and the trend is up → **HOLD**, with confidence `min(92, 70 + |Δ| × 1.5)`.
@@ -1981,25 +1963,22 @@ The header has three view tabs (**All Crops**, **Mandi Comparison**, **Crop Vari
 **Why:** a deeper look at one crop before deciding when to sell.
 
 - **Unknown crop id:** shows "Crop not found" with a link back to `/crops`.
-- **Live anchor:**
-  - The page calls `/api/mandi-prices?crop=…&state=…&district=…` for the user's location.
-  - If the response has `live: true` (official Agmarknet data), the current price becomes that average modal price, labelled "✓ Agmarknet · date · avg mandi".
-  - It then **rescales the whole simulated series** so the last point equals the real price: `k = livePrice / lastSimulatedPrice`, and every history and forecast point is multiplied by `k`.
-  - If there is no live price, the price is labelled "Estimated".
+- **Price source:**
+  - The page calls `/api/mandi-prices?crop=…&state=…&district=…` for the user's location. If the response has `live: true` (official Agmarknet data), the current price becomes that average modal price, labelled "✓ Agmarknet · date · avg mandi".
+  - The history and forecast come from `usePriceSeries` (chapter 2, sections 4–5). When the official series is shown it is used as is; only a **simulated** fallback series is rescaled so its last point equals the real price (`k = livePrice / lastPoint`).
+  - If there is no live price, the price is labelled "Estimated" (or "Agmarknet · state median" when the official history is shown).
+
 - **Four stat cards:** current price, MSP (above or below), AI recommendation (same `getRecommendation` rules as above) and a confidence bar.
 - **30‑Day Forecast chart** (Recharts `ComposedChart`):
   - Shows the last 14 points of history (green line), 30 forecast points (dashed gold line) and a shaded confidence band.
-  - Timeframe buttons **1M / 3M / 1Y** call `generatePriceHistoryByTimeframe`:
-    - 1M: 30 days, one point per day.
-    - 3M: 90 days, one point every 2 days.
-    - 1Y: 365 days, one point every 5 days.
-    - Each point adds a small seasonal sine factor plus noise, clamped between 0.68× and 1.42× the base price.
-  - Forecast formula: daily trend `(random − 0.44) × 0.004`, noise ±1.1% of base, clamped between 0.65× and 1.55× base. Band half‑width = `base × 0.035 × (1 + 0.018 × day)`, so the band gets wider further into the future.
-  - The chart is clearly labelled "Estimated trend (simulated)".
+  - Timeframe buttons **1M / 3M / 1Y** show the last 30, 90 or 365 days of the series (1Y is limited to the days available).
+  - The forecast is the damped-trend Holt model with an 80% range (chapter 2, section 5).
+  - The caption states the source: "Official Agmarknet daily prices (state · state median) — 1M history + 30-day forecast with 80% band", or the simulated wording.
+
 - **Chart / Table toggle:** the table shows the last 20 rows with date, price, band and an "Est. history" or "Est. forecast" badge.
 - **Influencing Factors:** Weather (Moderate), Demand & Supply (High), Logistics (Low), Govt Policy (Medium). These are **hard-coded text**, not calculated.
 - **Mandi Comparison:** a compact version of the component in section 13.
-- **Price History table:** the last 20 simulated days with volume, weather word and day‑to‑day % change.
+- **Price History table:** the last 20 days with the price, the number of mandis that reported (official data) and the day‑to‑day % change. The old random volume and weather columns were removed.
 - **"Generate Report" button:** `window.print()`. The browser's print dialog lets the user save it as a PDF.
 
 ---
@@ -2066,26 +2045,27 @@ The header has three view tabs (**All Crops**, **Mandi Comparison**, **Crop Vari
 - Advisory text: High risk with a falling price → "Sharp price drop… sell at highest‑paying APMC Mandi". High risk with a rising price → "High demand spike… capitalize now". Otherwise → "Stable market".
 - Shows count cards (High, Moderate, Stable), an average index, filter chips and a table with a volatility meter bar.
 
-**C. Model Accuracy cards (MAE, MSE, R², Last Update)**
-- `computeHistoryAndMetrics` makes simulated history, adds ±2% random noise to create a fake "prediction", and then calculates:
-  - MAE = mean |actual − predicted|
-  - MSE = mean (actual − predicted)²
-  - R² = 1 − SS_res / SS_tot, clamped between **0.70 and 0.99**
-- The page labels these "(simulated demo metrics)". **No real ML model is trained or tested.**
+**C. Model Accuracy cards (MAE, RMSE, MAPE, Last Update)**
+- These now come from the **backtest** of the forecasting model (chapter 2, section 5), not from made-up numbers. MAE and RMSE are in ₹ per quintal; MAPE is the average % error, shown next to the error of the "no change" guess on the same days.
+- The heading says whether the backtest ran on **Agmarknet prices** or on **simulated prices** (when a crop has no recent official data in the user's state).
+- The earlier version simulated a history, added ±2% noise to fake a "prediction" and clamped R² between 0.70 and 0.99. That was removed.
 
 **D. Charts**
-- Price history area chart with **7 / 14 / 30 / 60 / 90‑day** buttons (simulated).
-- 14‑day volume bar chart (random 7,000–13,000 units).
+- Price history area chart with **7 / 14 / 30 / 60 / 90‑day** buttons, using the official Agmarknet series (state median per day) or the labelled simulation.
+- A **"Mandis reporting"** bar chart for the last 14 days (official data only; with a simulated series it explains that counts need official history). It replaced the old random "trading volume" chart.
 - Category pie chart (counts from the crop catalogue).
 - "Crop Price Comparison": up to 8 crops of the same category, catalogue reference price vs MSP.
 
 **E. Raw data table and CSV download**
-- Last 20 rows with a vs‑MSP column.
-- **📥 Download CSV** builds a CSV in the browser: columns Date, Estimated Price, Volume, Weather, MSP. It saves through a `Blob` as `<Crop>_market_data_<N>d.csv`.
+- Last 20 rows with a vs‑MSP column and, for official data, the number of mandis that reported.
+- **📥 Download CSV** builds a CSV in the browser: columns Date (ISO), price (Agmarknet state median or simulated, as labelled), Mandis reporting, MSP. It saves through a `Blob` as `<Crop>_market_data_<N>d.csv`.
 
 ---
 
 #### 7. Government Schemes, "AgriSaarthi" portal (`/schemes`, `src/app/schemes/page.tsx`)
+
+**Layout note (12 Nov 2026):** the search used to be inside the Schemes list, below eight large tiles, so on a phone it was easy to miss. It moved to the top; the duplicate box in the list was removed. The same filter state (`searchQuery`) drives both the results and the "Search: …" chip.
+
 
 **Why:** farmers often miss schemes they qualify for. This page puts **103 schemes** in one place with simple eligibility help.
 
@@ -2114,7 +2094,7 @@ The page has 8 views, chosen with tile buttons:
 
 | View | What it does |
 |---|---|
-| 🏛️ **Schemes** | Search across title, description, benefit, state and category. Category dropdown and chips, and a **state filter with 37 options** (All States, All India, and 35 states and UTs). Picking a state shows **that state's schemes plus all "All India" schemes**. Cards have Details (opens a modal), ⭐ Save, 📊 Compare and a link to the official portal. Shows "Showing X of 103". |
+| 🏛️ **Schemes** | **A search bar sits at the top of the page, always visible** (typing from any view jumps back to the results, and the tile hub collapses while a search is active so results start straight below it). It searches across title, description, benefit, state and category. Category dropdown and chips, and a **state filter with 37 options** (All States, All India, and 35 states and UTs). Picking a state shows **that state's schemes plus all "All India" schemes**. Cards have Details (opens a modal), ⭐ Save, 📊 Compare and a link to the official portal. Shows "Showing X of 103". |
 | Detail modal | Benefit, description, coverage, eligibility list, required documents checklist, how to apply, Save button and official portal link. |
 | ⭐ **Saved** | Bookmarks stored in `localStorage` key `agri_saved_schemes`, with a clear‑all option. |
 | 📊 **Compare** | Up to **4 schemes** side by side (a toast warns if you try a 5th). Rows: category, coverage, key benefit, first 3 documents, first 2 eligibility points, official link. |
@@ -2515,6 +2495,9 @@ All of this is in `src/app/chatbot/page.tsx` and uses the browser's built-in Web
 
 #### 2.1 Approach
 
+**Phone frame and container queries (12 Nov 2026).** Every screen is shown inside `.app-frame`, a 430 px phone-sized column (full screen on a phone, a centred rounded "phone" on a laptop, `@media (min-width: 520px)`). The responsive rules in `globals.css` are `@container app (max-width: …)` queries on that frame instead of `@media` queries on the window, so a wide laptop window still gets the phone layout. The frame also has `transform: translateZ(0)`, which makes `position: fixed` children (menu, backdrop, toasts, install banner) fixed to the frame instead of the window. Page roots are forced to `width: 100%` because a root with `max-width` and `margin: 0 auto` inside the column layout otherwise shrinks to its widest content and gets clipped (this was the Agri-Tools layout bug). Tables keep whole words (`word-break: normal`) and scroll sideways inside `.table-wrap`.
+
+
 **What:** One global stylesheet with **CSS custom properties** (variables such as `--primary`) and reusable class names (`.card`, `.btn`, `.badge`, ...). Many components also use inline `style={{...}}` that points at these variables.
 
 Tailwind CSS v4 is installed and imported (`@import "tailwindcss"`), but most of the styling is the custom classes and inline styles, not Tailwind utility classes.
@@ -2620,10 +2603,10 @@ PWA means "Progressive Web App": a website that can be installed like a phone ap
 |---|---|---|
 | Language | TypeScript | `tsconfig.json`: `"strict": true`, `noEmit`, `isolatedModules`, `moduleResolution: "bundler"`, path alias `@/*` → `./src/*`, `allowJs: true` |
 | Framework | Next.js **16.2.10** App Router, React **19.2.4** | `package.json`. Node `>=20.9.0` required. |
-| Production build | Reported as passing | `next build`. Not re-run while preparing this document, because the laptop is low on RAM. |
+| Production build | **Not re-run in the 12 Nov 2026 update** (low-RAM laptop). The dev server compiled every page, and CI runs `next build` on every push | `next build` |
 | Lint | ESLint 9 flat config | `eslint.config.mjs` (details below) |
-| Automated tests | **None** | No unit, integration or end-to-end tests, and no test script in `package.json`. Testing was manual, in the browser. |
-| CI | None | No `.github` workflows |
+| Automated tests | **20 unit tests, all passing** | `npm test` (Node's built-in runner, no extra packages): forecast model (including "never trains on the days it is scored on"), record aggregation, rate limiter, Groq retry-time and JSON parsing. No end-to-end tests. |
+| CI | GitHub Actions | `.github/workflows/ci.yml` runs install, lint, type check, tests and build on every push and pull request |
 | Secrets | `.env.example` documents every key | Server-only keys (`GROQ_API_KEY`, `SUPABASE_SECRET_KEY`, `VAPID_PRIVATE_KEY`, `DATA_GOV_API_KEY`, `PUSH_ADMIN_TOKEN`) have no `NEXT_PUBLIC_` prefix, so they never reach the browser. |
 | Dependencies | Small | supabase-js, date-fns, lucide-react, recharts, web-push |
 
@@ -2635,7 +2618,8 @@ PWA means "Progressive Web App": a website that can be installed like a phone ap
 
 **Known code-quality weaknesses:**
 - `Language` is declared in three places.
-- `processDocumentOcr()` in `src/lib/cropData.ts` appears to be unused. The OCR route has its own fallback, `generateSmartDynamicResult`.
+- `processDocumentOcr()` in `src/lib/cropData.ts` appears to be unused (the OCR route no longer has a fake fallback).
+- `src/app/schemes/page.tsx` is about 2,800 lines and `src/app/tools/page.tsx` about 1,500; they should be split into components.
 - Several CSS rules are duplicated.
 - `src/lib/cropData.ts` is a large mixed file of about 1,360 lines: data, simulators, calculators and helpers.
 - Inline `tr({...})` objects make some pages long.
@@ -2648,18 +2632,18 @@ PWA means "Progressive Web App": a website that can be installed like a phone ap
 
 | Module | Status | Honest notes |
 |---|---|---|
-| Login / registration | **Done** | Supabase Auth (passwords hashed by Supabase). Profile cached in localStorage and written to the `profiles` table. RLS policies let each user read, insert and update only their own row. |
+| Login / registration | **Done (two modes)** | Supabase Auth when configured (hashed by Supabase, RLS on `profiles`). Without Supabase: browser-only accounts on that device (salted SHA-256 hash in localStorage, no sync, first sign-in creates the account). |
 | Multilingual UI (6 languages) | **Mostly done** | Kannada has no scheme texts. Crop descriptions are EN/TA/TE only. Toasts are English only. |
-| Dark mode and responsive layout | **Done** | Possible short light flash on load |
+| Dark mode and phone layout | **Done** | Everything is shown in a 430 px phone frame with container-query layouts (see chapter 8, section 2.1). Possible short light flash on load |
 | Live price ticker (`getLivePrice`) | **Simulated** | Random walk: each call adds `(Math.random() - 0.485) × basePrice × 0.008`, clamped between 72% and 145% of `basePrice`. Not real-time market data. |
-| Price history charts | **Simulated** | `generatePriceHistory` and `generatePriceHistoryByTimeframe` use random noise (plus a small seasonal sine term in the timeframe version) around a fixed `basePrice`. Volume and weather labels are random too. |
-| 30-day "AI" forecast | **Simulated, rule-based** | `generateForecast` uses a random trend plus random noise. The confidence band is `basePrice × 0.035 × (1 + day × 0.018)`. **There is no trained ML model.** |
+| Price history | **Real where data exists** | Official Agmarknet daily history (state median) for per-quintal crops with at least 45 recent days; otherwise a labelled, seeded simulation. Portfolio graph and ticker remain simulated. |
+| 30-day forecast | **Real statistical model** | Damped-trend Holt smoothing on log prices with an 80% range, fitted per crop and state, with a rolling backtest (MAE, RMSE, MAPE vs the "no change" guess). **Not machine learning**, and on volatile crops only about as accurate as "no change". |
 | Buy/Hold/Sell recommendation | **Rule-based** | `getRecommendation`: compares the forecast change (above 5% or below −5%), the 7-day vs 30-day average, and the price against MSP × 0.95. Confidence is a formula, and in the "stable" case it is random between 60 and 80. Note that the rules never actually output BUY. |
 | Mandi prices (`/api/mandi-prices`) | **Partial (real when a key is set)** | Uses real Agmarknet / data.gov.in prices when `DATA_GOV_API_KEY` is set and the crop is priced per quintal (cached for 1 hour). Otherwise it uses a Groq AI estimate labelled "not official", and finally a local price model labelled "Indicative estimate". |
 | Weather | **Done (live)** | Open-Meteo API (free, no key needed), 7-day forecast. Mock weather if the call fails. |
 | AgriBot chatbot | **Done, with fallback** | Groq LLM (`qwen/qwen3.8-27b`, then `openai/gpt-oss-20b`), with a 2,000-character message limit. Offline keyword engine when there is no key or Groq fails. The offline pest, price and scheme answers exist only in EN/TA/TE. Crop info and greetings cover all 6 languages. |
-| Voice input and output | **Done** | Browser Web Speech API. Depends on the browser and installed voices. |
-| Document OCR (`/api/ocr`) | **Partial** | Groq vision model when a key is set (upload limit 4 MB, images 3 MB). Otherwise a templated "smart" fallback result based on the file name, which is **not** real OCR. |
+| Voice input and output | **Done (input untested with a real voice here)** | Browser Web Speech API. On-screen messages for permission, microphone, network, language and https problems, and a guard against endless restarts. Depends on the browser (best in Chrome/Edge) and installed voices. |
+| Document OCR (`/api/ocr`) | **Done, rate-limited by Groq** | Groq vision model when a key is set (images 3 MB, PDFs 4 MB). English + the user's language per scan, other languages translated on demand. A failed or rate-limited scan returns a clear error (the fake "smart" fallback was removed). Roughly one scan a minute on the free tier. |
 | Price threshold alerts | **Done (client-side)** | Alerts are stored in localStorage (`agri_price_alerts`). Checked 4 s after load, then every 60 s, against the **simulated** live price. Each alert triggers at most once per 10 minutes. Toasts are throttled to once per minute per alert. Only runs while the app is open. |
 | Web Push notifications | **Done (needs VAPID keys)** | `web-push` library. Subscriptions are saved in Supabase `push_subscriptions` (RLS on with no policies, so only the server's secret key can access it), or in a local file or memory. Broadcasts need `PUSH_ADMIN_TOKEN`. |
 | Government schemes | **Done (static data)** | 103 hand-written schemes in `governmentSchemesData.ts`. Not fetched live, so they can go out of date. |
@@ -2669,34 +2653,37 @@ PWA means "Progressive Web App": a website that can be installed like a phone ap
 | Nearby farmer network | **Simulated** | `getNearbyFarmerNetwork()` returns generated numbers |
 | CSV / PDF export | **Done** | The CSV contains simulated history |
 | Offline mode | **Not done** | The service worker does not cache pages |
-| Automated tests | **Not done** | — |
+| API protection | **Rate limiting added** | Per-IP limits on all four data routes; sign-in required for chat and OCR only when Supabase is configured |
+| Install on a phone | **Done, untested on a phone** | Install banner and manifest; needs the deployed https site to test |
+| Automated tests | **Partly done** | 20 unit tests and CI; no end-to-end tests |
 
 ---
 
 ### 6. Known limitations
 
-- Prices in the ticker, history charts and forecast are **simulated with random numbers**, so they change on every reload and are not real market data.
-- The "AI forecast" is **not machine learning**. It is a random-trend generator, and the recommendation is a set of fixed rules.
+- The **price ticker** (`getLivePrice`), the volatility alerts, the heatmap, the portfolio graph and the nearby-farmer and PM-KISAN samples are **simulated or hard-coded**. They change on reload (ticker) or are fixed sample data.
+- The forecast is a **statistical model, not machine learning**, and for volatile crops it is only about as accurate as "no change" (the app shows the backtest). The history is a state-level median, not the farmer's own mandi, and crops with no recent official data in a state fall back to a labelled simulation.
 - Real mandi prices appear only when `DATA_GOV_API_KEY` is set. Otherwise the numbers are estimates (the screen labels them as such).
 - Price alerts and saved chats live in **localStorage**: one browser only, lost if browser data is cleared, and checked only while the app is open.
 - Kannada lacks scheme texts. Crop descriptions and some offline chatbot answers lack Kannada, Malayalam and Hindi. Some toasts are English only.
 - The voice features depend on the browser (best in Chrome and Edge) and on which OS voices are installed.
-- OCR without a Groq key gives a template answer, not a real reading of the document.
+- The scanner needs a Groq key and is limited by Groq's per-minute allowance (roughly one scan a minute on the free tier; chat shares it). Image-only PDFs cannot be read, and iPhone HEIC photos are rejected with a message.
 - Possible short light-theme flash when dark mode is restored.
 - Protected pages render only in the browser, so the server render is a loading screen only.
-- There is no offline caching, no automated tests, no CI and no rate limiting on API routes.
+- There is no offline caching and no end-to-end tests. Rate limits are in memory (per server instance). Without Supabase, accounts live only in one browser and the server cannot verify them.
 - The scheme data is static and can go out of date.
 - AI answers (chat, OCR, AI mandi estimates) can be wrong and are not checked by an expert.
+- The microphone was not tested with a real voice in the development preview (it blocks the microphone); test in Chrome on the deployed https site.
 
 ### 7. Future work
 
-1. Train a real forecasting model (for example ARIMA, Prophet or LSTM) on historical Agmarknet data, and report the error (MAE or MAPE) honestly.
-2. Store daily Agmarknet prices in Supabase, so charts show real history instead of random data.
+1. Evaluate richer models (for example ARIMA, Prophet or a gradient-boosted model with weather and arrivals) against the current baseline, using the same backtest, and keep a model only if it beats "no change" by a clear margin.
+2. Store daily Agmarknet prices in a database so history is not re-fetched and can go back further than a year.
 3. Move price alerts to the server (Supabase table plus a scheduled job), so push alerts work when the app is closed.
 4. Complete the translations: Kannada scheme texts, crop descriptions in all languages, translated toasts, and one shared `Language` type.
-5. Add tests (unit tests for `tr`, the KCC calculator and `getRecommendation`, plus end-to-end tests for login and alerts) and a GitHub Actions CI pipeline.
+5. Add end-to-end tests (login, alerts, scanner) and unit tests for `tr`, the KCC calculator and `getRecommendation`.
 6. Add offline caching in the service worker for rural areas with poor network.
-7. Add rate limiting and input validation on `/api/chat`, `/api/ocr` and `/api/mandi-prices`.
+7. Use a shared store (for example Redis) for rate limits, and move the volatility and heatmap panels to the official price history.
 8. Fetch scheme data from official sources, or add a "last verified" date.
 9. Apply the dark-mode class before first paint (a small inline script) to remove the flash.
 10. Split `cropData.ts` into smaller modules and remove dead code.
@@ -2715,12 +2702,14 @@ Supabase gives a hosted PostgreSQL database plus ready-made authentication, with
 Row Level Security is a PostgreSQL feature: the database itself decides which rows a user may see or change. On `profiles` we enabled RLS with policies such as "select/insert/update own row", so a user can only touch the row matching their own auth user id, even if someone calls the API directly. On `push_subscriptions`, RLS is on with **no** policies, so the public key cannot access it at all. Only the server, with the secret key, can.
 
 **Q4. How do live prices work?**
-There are two parts.
-- The **ticker** uses `getLivePrice()`, which is a **simulated** random walk around each crop's base price, limited to 72% to 145% of the base price.
-- **Mandi comparison** calls `/api/mandi-prices`. If `DATA_GOV_API_KEY` is set, it fetches official Agmarknet daily prices from data.gov.in in ₹/quintal, cached for one hour. If not, it falls back to a Groq AI estimate and then to a local model. Both fallbacks are clearly labelled as estimates.
+There are three parts.
+- The **ticker** uses `getLivePrice()`, a **simulated** random walk around each crop's base price. It is not market data.
+- **Mandi comparison** calls `/api/mandi-prices`. If `DATA_GOV_API_KEY` is set, it fetches today's official Agmarknet prices from data.gov.in in ₹/quintal, cached for one hour. If not, it falls back to a Groq AI estimate, then a model estimate, and the screen labels them as estimates.
+- **Price history** comes from the official daily dataset on data.gov.in through `/api/price-history` (chapter 2, section 4).
 
-**Q5. Is your price forecast machine learning?**
-Honestly, no. `generateForecast()` uses a random trend plus random noise, with a confidence band that widens each day. The Buy/Hold/Sell advice is rule-based: forecast change of ±5%, 7-day vs 30-day average, and price vs MSP. The pipeline and UI are ready, and replacing the generator with a trained model on real Agmarknet history is our main future work.
+**Q5. Is your price forecast machine learning? How accurate is it?**
+It is a statistical model, not machine learning: damped-trend exponential smoothing fitted to each crop's real daily Agmarknet prices (state median), with an 80% prediction range that widens with time. The app measures its own accuracy with a rolling backtest (it hides the last 14 days, forecasts them, and compares with what happened). On volatile crops such as tomato it is only about as accurate as guessing "no change" (about 9.8% error against 9.3%), while for rice it was slightly better (about 11% against 12%). We show that comparison on the Analytics page. The Buy/Hold/Sell advice is separate and rule-based: forecast change of ±5%, 7-day vs 30-day average, and price versus MSP.
+
 
 **Q6. How do price alerts work?**
 The user sets a crop, a mandi, a condition ("above" or "below") and a target price. This is saved in localStorage under `agri_price_alerts`. `AppProvider` checks all active alerts 4 seconds after load and then every 60 seconds. When the condition is met, and the alert has not fired in the last 10 minutes, it shows an in-app toast and notification and sends a Web Push notification through the service worker. Limitation: it compares against the simulated price and runs only while the app is open.
@@ -2744,14 +2733,14 @@ It uses the browser's free Web Speech API. Speech recognition uses the locale of
 Hydration is React attaching to server-rendered HTML. If the first browser render differs from the server HTML, React reports an error. We render the same defaults on both sides and read localStorage only in `useEffect`. `ClientLayout` uses `useSyncExternalStore` to show the same loading screen until the browser takes over.
 
 **Q13. How is the app secured?**
-- Passwords are handled by Supabase Auth, never stored by us.
+- Passwords are handled by Supabase Auth when it is configured; in browser-only mode they are stored only as a salted SHA-256 hash on the user's own device.
 - Database tables use RLS.
 - Secret keys (Groq, Supabase secret, VAPID private, data.gov.in) are server-only environment variables without the `NEXT_PUBLIC_` prefix.
 - The broadcast push route needs a Bearer admin token.
 - Inputs are trimmed or limited (chat message 2,000 characters, query parameters 80 characters, upload 4 MB).
 - Protected pages redirect to `/login` when there is no session.
 
-Missing pieces: rate limiting and automated security tests.
+Added: per-IP rate limits on every data route, and a sign-in check on chat and OCR when Supabase is configured. Missing: a shared rate-limit store and automated security tests. In browser-only mode the server cannot verify users, so only the rate limit protects the AI routes.
 
 **Q14. Is it scalable?**
 - The frontend and API routes are stateless serverless functions, so they scale horizontally on Vercel.
@@ -2764,7 +2753,7 @@ Bottlenecks:
 - External AI calls have rate limits.
 
 **Q15. Do you have tests?**
-No automated tests yet. We tested manually in Chrome, Edge and mobile view. TypeScript strict mode and ESLint (Next.js core-web-vitals and TypeScript rules) catch many mistakes at build time, and the production build was reported as passing. Adding unit and end-to-end tests with CI is planned.
+Yes, a small set: 20 unit tests (`npm test`, Node's built-in runner) covering the forecasting model, the daily-price aggregation, the rate limiter and the Groq helpers, and a GitHub Actions pipeline that also runs lint, the type check and the build. There are no end-to-end tests; the screens were checked by hand in the browser at desktop and phone sizes. TypeScript strict mode and ESLint catch many mistakes at build time.
 
 **Q16. How is the design made responsive and themeable?**
 All colours are CSS variables in `globals.css`. Dark mode adds the `dark-mode` class on `<body>`, which redefines those variables, and sets `color-scheme: dark` so native dropdowns and scrollbars also turn dark. Below 768px the sidebar becomes a slide-in drawer with a hamburger header and backdrop. Grids collapse from 4 or 3 columns down to 1.
@@ -2773,20 +2762,20 @@ All colours are CSS variables in `globals.css`. Dark mode adds the `dark-mode` c
 From the free Open-Meteo API, using the user's latitude and longitude (from a manual state/district choice, or GPS plus BigDataCloud reverse geocoding). It gives current conditions and a 7-day forecast. If the API fails, mock weather is shown.
 
 **Q18. How does document scanning (OCR) work?**
-The user uploads an image or PDF (images under 3 MB, PDFs under 4 MB). `/api/ocr` sends it to a Groq vision model, which returns JSON with the document type, a summary and action items in all six languages. Missing translations are filled with templates. Without a Groq key, it returns a templated result based on the file name, which is not real OCR.
+The user uploads an image or PDF (images under 3 MB, PDFs under 4 MB). `/api/ocr` sends an image to a Groq vision model and a PDF's extracted text to text models, asking for the document type, a summary and action items in **English plus the user's language**; other languages are translated when the user opens that tab. Groq's free tier allows only about 1,000 output tokens a minute on the vision model, so the first design (all six languages in one reply) kept hitting the limit; the current design is about a third of the size, waits out short limits, and shows a clear "busy, try again in N seconds" instead of made-up text. Limits: image-only PDFs cannot be read, and the sample-document buttons only describe a document from its name.
 
 **Q19. What are the biggest weaknesses of your project?**
-- Simulated prices and forecast, with no real ML model.
+- The forecast is a statistical baseline (not ML) that is only about as accurate as "no change" on volatile crops, and some widgets (ticker, volatility, heatmap) are still simulated.
 - Alerts work only while the app is open, and are stored per browser.
 - Incomplete Kannada scheme translations.
-- No tests and no offline caching.
+- Only unit tests (no end-to-end), no offline caching, and accounts that live in one browser when Supabase is not configured.
 
 We are honest about these in the UI too: estimated prices are labelled as estimates.
 
 **Q20. What would you improve first if you had three more months?**
-1. Store real daily Agmarknet prices and train a forecasting model, measuring its accuracy.
+1. Compare richer forecasting models against the current baseline with the same backtest, and keep one only if it clearly beats "no change".
 2. Move alerts to a server-side scheduled job, so farmers get notified even when the app is closed.
-3. Complete the translations and add automated tests with CI.
+3. Complete the translations and add end-to-end tests.
 
 
 ---
