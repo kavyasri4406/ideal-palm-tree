@@ -6,6 +6,7 @@ import { getCurrentUser, syncSession } from "@/lib/auth";
 import { useApp } from "@/lib/AppContext";
 
 import NotificationManager from "@/components/NotificationManager";
+import InstallApp from "@/components/InstallApp";
 
 const PUBLIC = ["/login"];
 
@@ -31,7 +32,7 @@ export default function ClientLayout({ children }: { children: React.ReactNode }
     if (isClient && !isPublic && !hasUser) router.replace("/login");
   }, [isClient, isPublic, hasUser, pathname, router]);
 
-  if (isPublic) return <>{children}</>;
+  if (isPublic) return <>{children}<InstallApp /></>;
   if (!ready) return (
     <div style={{ display: "flex", alignItems: "center", justifyContent: "center", minHeight: "100vh", background: "var(--bg)" }}>
       <div style={{ textAlign: "center" }}>
@@ -88,6 +89,8 @@ export default function ClientLayout({ children }: { children: React.ReactNode }
         )}
         <div className={`main-layout ${pathname === "/chatbot" ? "is-chatbot-layout" : ""}`} style={{ flex: 1 }}>{children}</div>
       </div>
+
+      <InstallApp />
 
       {/* Global Toast Notification */}
       {toast && (

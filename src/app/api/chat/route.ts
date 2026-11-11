@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { LIMITS, rateLimited, requireUser } from "@/lib/apiGuard";
 import { getChatbotResponse, type Language } from "@/lib/chatbot";
 import { groqChat, type GroqMessage } from "@/lib/groq";
 import { CROPS } from "@/lib/cropData";
@@ -70,6 +71,9 @@ async function callGroqAI(
 }
 
 export async function POST(req: NextRequest) {
+  const blocked = rateLimited(req, LIMITS.chat) ?? (await requireUser(req));
+  if (blocked) return blocked;
+
   let userMessage = "hello";
   let userLang: Language = "en";
 

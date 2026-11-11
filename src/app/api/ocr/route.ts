@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { LIMITS, rateLimited, requireUser } from "@/lib/apiGuard";
 import { groqChat, parseJsonReply, type GroqMessage } from "@/lib/groq";
 
 const OCR_PROMPT_HEADER = `You are an expert universal optical character recognition (OCR) and document analysis AI for Indian farmers and users.
@@ -325,6 +326,9 @@ export async function GET() {
 }
 
 export async function POST(req: NextRequest) {
+  const blocked = rateLimited(req, LIMITS.ocr) ?? (await requireUser(req));
+  if (blocked) return blocked;
+
   try {
     const contentType = req.headers.get("content-type") || "";
 

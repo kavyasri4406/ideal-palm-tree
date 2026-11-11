@@ -1,7 +1,9 @@
 "use client";
 
 import { useMemo } from "react";
-import { CROPS, formatPrice, generatePriceHistoryByTimeframe } from "@/lib/cropData";
+import { CROPS, formatPrice } from "@/lib/cropData";
+import { simulateHistory } from "@/lib/forecast";
+import { dayLabel } from "@/lib/usePriceSeries";
 import { useApp } from "@/lib/AppContext";
 import { tr } from "@/lib/i18n";
 import { ResponsiveContainer, AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip } from "recharts";
@@ -21,8 +23,10 @@ export default function PortfolioPerformanceGraph({ portfolioIds }: PortfolioPer
       return { chartData: [], currentTotal: 0, initialTotal: 0, changeAmount: 0, changePercent: 0 };
     }
 
-    // Generate 30 days history for each tracked crop
-    const histories = trackedCrops.map(crop => generatePriceHistoryByTimeframe(crop, "1M"));
+    // 30 days of estimated history for each tracked crop (the same series every render)
+    const histories = trackedCrops.map(crop =>
+      simulateHistory(crop.id, crop.basePrice, 30).map(h => ({ date: dayLabel(h.date), price: h.price }))
+    );
     const dayCount = histories[0]?.length || 30;
 
     const data: { date: string; value: number }[] = [];

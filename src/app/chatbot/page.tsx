@@ -4,6 +4,7 @@ import { getChatbotResponse, createMessage, QUICK_PROMPTS, LANG_LABELS, detectLa
 import { useApp } from "@/lib/AppContext";
 import type { ChatMessage, Language } from "@/lib/chatbot";
 import { tr } from "@/lib/i18n";
+import { authHeaders } from "@/lib/apiClient";
 
 const WELCOME: Partial<Record<Language, string>> = {
   en: "👋 Hello! I'm AgriBot 🌱\n\nI'm your AI agriculture assistant. Ask me about crop choices, market prices, weather impacts, or government schemes in English, Tamil, Telugu, Kannada, Malayalam, or Hindi!",
@@ -416,7 +417,7 @@ export default function ChatbotPage() {
     try {
       const res = await fetch("/api/chat", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", ...(await authHeaders()) },
         body: JSON.stringify({
           message: text,
           history: historyForApi,

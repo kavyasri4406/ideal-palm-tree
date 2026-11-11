@@ -3,6 +3,7 @@
 import { useState, useRef } from "react";
 import { useApp, type Language } from "@/lib/AppContext";
 import { tr, type Localized } from "@/lib/i18n";
+import { authHeaders } from "@/lib/apiClient";
 
 export interface OcrResult {
   documentType: string;
@@ -207,6 +208,7 @@ export default function DocumentOcr() {
 
       const res = await fetch("/api/ocr", {
         method: "POST",
+        headers: await authHeaders(),
         body: formData,
         signal: controller.signal
       });
@@ -239,7 +241,7 @@ export default function DocumentOcr() {
     try {
       const res = await fetch("/api/ocr", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", ...(await authHeaders()) },
         body: JSON.stringify({ demoKey, fileName }),
       });
 

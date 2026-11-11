@@ -2,6 +2,7 @@ import { getStrictDistrictMandis } from "@/lib/mandiDatabase";
 import { CROPS, type MandiInfo } from "@/lib/cropData";
 import { groqChat, hasGroqKey, parseJsonReply } from "@/lib/groq";
 import { getAgmarknetPrices, hasAgmarknetKey } from "@/lib/agmarknet";
+import { LIMITS, rateLimited } from "@/lib/apiGuard";
 import { NextRequest, NextResponse } from "next/server";
 
 // APMC mandi rates. Official Agmarknet prices (data.gov.in) when DATA_GOV_API_KEY is set and the
@@ -50,6 +51,9 @@ function normalizeAiMandis(raw: unknown, crop: string, district: string, state: 
 }
 
 export async function GET(req: NextRequest) {
+  const limited = rateLimited(req, LIMITS.mandiPrices);
+  if (limited) return limited;
+
   const { searchParams } = new URL(req.url);
   const crop = (searchParams.get("crop") || "Rice").slice(0, 80);
   const variety = (searchParams.get("variety") || "").slice(0, 80);
