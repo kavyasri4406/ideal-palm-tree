@@ -36,7 +36,8 @@ export function rateLimited(req: NextRequest, limiter: RateLimiter): NextRespons
 /**
  * Checks the request carries a valid Supabase session (Authorization: Bearer <access token>).
  * Returns a 401/503 response to send back, or null when the caller may proceed.
- * When Supabase isn't configured nobody can sign in, so the check is skipped.
+ * When Supabase isn't configured, accounts exist only in the browser and the server has nothing
+ * to verify, so the check is skipped and the rate limit is the only protection.
  */
 export async function requireUser(req: NextRequest): Promise<NextResponse | null> {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;

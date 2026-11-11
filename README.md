@@ -33,12 +33,16 @@ npm run dev
 
 Open http://localhost:3000.
 
-Every key is optional except Supabase, which the login needs. Without a key the feature that uses
-it falls back to an offline or simulated mode that is labelled as such in the UI.
+Every key is optional. Without a key the feature that uses it falls back to an offline or
+simulated mode that is labelled as such in the UI.
+
+**Login.** With the Supabase keys set, accounts live in Supabase Auth. Without them, login uses
+simple accounts stored in the browser: the first sign-in with an email creates the account, and
+it exists only on that device.
 
 | Variable | Used for |
 |---|---|
-| `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` | Login and per-user data. Run `supabase/schema.sql` in the project once. |
+| `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` | Optional: Supabase login and per-user data. Run `supabase/schema.sql` in the project once. |
 | `DATA_GOV_API_KEY` | Official Agmarknet prices and price history (free key from data.gov.in). |
 | `GROQ_API_KEY` | AgriBot answers and the document scanner. |
 | `NEXT_PUBLIC_VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY`, `VAPID_SUBJECT` | Push notifications. Generate keys with `node scripts/gen_vapid.cjs`. |
@@ -97,6 +101,7 @@ Limits worth knowing:
 
 - `/api/chat` and `/api/ocr` spend Groq quota, so they require a signed-in Supabase user
   (`Authorization: Bearer <access token>`), checked in `src/lib/apiGuard.ts`.
+  With browser-only accounts the server has nothing to verify, so only the rate limit applies.
 - All data routes are rate limited per IP address (`src/lib/rateLimit.ts`). The limiter is kept in
   memory, so on serverless hosting it caps abuse per instance rather than enforcing an exact quota.
 
