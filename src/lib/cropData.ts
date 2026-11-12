@@ -321,7 +321,7 @@ export function getCropsByState(state: string): Crop[] {
   return CROPS.filter(c => c.states.some(s => s.toLowerCase().includes(state.toLowerCase())));
 }
 
-// Simulate live price with small random walk
+// Simulated price ticker (small random walk around the reference price); not an official price
 const livePrices: Record<string, number> = {};
 
 export function getLivePrice(crop: Crop): number {
@@ -332,48 +332,6 @@ export function getLivePrice(crop: Crop): number {
     Math.min(crop.basePrice * 1.45, livePrices[crop.id] + change)
   );
   return parseFloat(livePrices[crop.id].toFixed(2));
-}
-
-export function generatePriceHistory(crop: Crop, days: number = 60): { date: string; price: number; volume: number; weather: string }[] {
-  const weatherTypes = ["Sunny", "Cloudy", "Rainy", "Partly Cloudy", "Foggy"];
-  const data: { date: string; price: number; volume: number; weather: string }[] = [];
-  let price = crop.basePrice;
-  const now = new Date();
-  for (let i = days; i >= 0; i--) {
-    const date = new Date(now);
-    date.setDate(date.getDate() - i);
-    const change = (Math.random() - 0.48) * (crop.basePrice * 0.028);
-    price = Math.max(crop.basePrice * 0.7, Math.min(crop.basePrice * 1.4, price + change));
-    data.push({
-      date: date.toLocaleDateString("en-IN", { day: "2-digit", month: "short" }),
-      price: parseFloat(price.toFixed(2)),
-      volume: Math.floor(7000 + Math.random() * 6000),
-      weather: weatherTypes[Math.floor(Math.random() * weatherTypes.length)],
-    });
-  }
-  return data;
-}
-
-export function generateForecast(crop: Crop, lastPrice: number, days: number = 30): { date: string; predicted: number; lower: number; upper: number }[] {
-  const data: { date: string; predicted: number; lower: number; upper: number }[] = [];
-  let price = lastPrice;
-  const trend = (Math.random() - 0.44) * 0.004;
-  const now = new Date();
-  for (let i = 1; i <= days; i++) {
-    const date = new Date(now);
-    date.setDate(date.getDate() + i);
-    const noise = (Math.random() - 0.5) * (crop.basePrice * 0.022);
-    price = price * (1 + trend) + noise;
-    price = Math.max(crop.basePrice * 0.65, Math.min(crop.basePrice * 1.55, price));
-    const margin = crop.basePrice * 0.035 * (1 + i * 0.018);
-    data.push({
-      date: date.toLocaleDateString("en-IN", { day: "2-digit", month: "short" }),
-      predicted: parseFloat(price.toFixed(2)),
-      lower: parseFloat((price - margin).toFixed(2)),
-      upper: parseFloat((price + margin).toFixed(2)),
-    });
-  }
-  return data;
 }
 
 export function getRecommendation(crop: Crop, history: { price: number }[], forecast: { predicted: number }[]): {
@@ -424,7 +382,7 @@ export function getRecommendation(crop: Crop, history: { price: number }[], fore
     reasonTE = `ప్రస్తుత ధర MSP ₹${crop.msp} కంటే తక్కువగా ఉంది. ప్రభుత్వ సేకరణ కోసం వేచి ఉండండి.`;
   } else {
     action = "HOLD";
-    confidence = Math.floor(60 + Math.random() * 20);
+    confidence = 65;
     reason = `Market is stable. Monitor weather and demand signals over the next 2 weeks.`;
     reasonTA = `சந்தை நிலையானது. அடுத்த 2 வாரங்களில் வானிலை மற்றும் தேவை சமிக்ஞைகளை கண்காணிக்கவும்.`;
     reasonTE = `మార్కెట్ స్థిరంగా ఉంది. రాబోయే 2 వారాలలో వాతావరణం మరియు డిమాండ్ సంకేతాలను పర్యవేక్షించండి.`;
@@ -772,47 +730,6 @@ export function getMspStatus(crop: Crop, currentPrice: number): MspStatusInfo {
 
 
 // ── 4. MULTI-TIMEFRAME PRICE HISTORY ENGINE ─────────────────────────────────
-export function generatePriceHistoryByTimeframe(
-  crop: Crop,
-  timeframe: "1M" | "3M" | "1Y" = "1M"
-): { date: string; price: number; volume: number; weather: string }[] {
-  const daysMap: Record<string, number> = { "1M": 30, "3M": 90, "1Y": 365 };
-  const days = daysMap[timeframe] || 30;
-
-  const step = timeframe === "1Y" ? 5 : timeframe === "3M" ? 2 : 1;
-  const weatherTypes = ["Sunny", "Cloudy", "Rainy", "Partly Cloudy", "Foggy"];
-  const data: { date: string; price: number; volume: number; weather: string }[] = [];
-
-  let price = crop.basePrice;
-  const now = new Date();
-
-  for (let i = days; i >= 0; i -= step) {
-    const date = new Date(now);
-    date.setDate(date.getDate() - i);
-
-    const month = date.getMonth();
-    const seasonalFactor = Math.sin((month / 12) * Math.PI * 2) * 0.05;
-    const noise = (Math.random() - 0.48) * (crop.basePrice * 0.035);
-
-    price = price * (1 + seasonalFactor * 0.05) + noise;
-    price = Math.max(crop.basePrice * 0.68, Math.min(crop.basePrice * 1.42, price));
-
-    const dateFormat = timeframe === "1Y"
-      ? date.toLocaleDateString("en-IN", { month: "short", year: "2-digit" })
-      : date.toLocaleDateString("en-IN", { day: "2-digit", month: "short" });
-
-    data.push({
-      date: dateFormat,
-      price: parseFloat(price.toFixed(2)),
-      volume: Math.floor(7000 + Math.random() * 6000),
-      weather: weatherTypes[Math.floor(Math.random() * weatherTypes.length)],
-    });
-  }
-
-  return data;
-}
-
-
 // ── 5. KCC LOAN & EMI CALCULATOR ENGINE ──────────────────────────────────────
 export interface KccLoanResult {
   cropLimit: number;

@@ -19,7 +19,7 @@ export interface AgmarknetRecord {
 }
 
 // App state name → Agmarknet state name, where they differ
-const STATE_ALIASES: Record<string, string> = {
+export const STATE_ALIASES: Record<string, string> = {
   "Kerala": "Keralam",
   "Chhattisgarh": "Chattisgarh",
   "Delhi": "NCT of Delhi",
@@ -28,7 +28,7 @@ const STATE_ALIASES: Record<string, string> = {
 };
 
 // App crop id → Agmarknet commodity names, most relevant first
-const COMMODITY_NAMES: Record<string, string[]> = {
+export const COMMODITY_NAMES: Record<string, string[]> = {
   rice: ["Paddy(Common)", "Paddy(Basmati)", "Rice"],
   wheat: ["Wheat"],
   corn: ["Maize"],

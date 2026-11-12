@@ -1,7 +1,9 @@
 "use client";
 import { useState, useEffect, useMemo } from "react";
 import { useRouter } from "next/navigation";
-import { CROPS, CATEGORIES, generatePriceHistory, generateForecast, getRecommendation, formatPrice, getLivePrice, getVarietyName, getVarietyDesc } from "@/lib/cropData";
+import { CROPS, CATEGORIES, getRecommendation, formatPrice, getLivePrice, getVarietyName, getVarietyDesc } from "@/lib/cropData";
+import { usePriceSeries } from "@/lib/usePriceSeries";
+import { simulatedPriceSeries } from "@/lib/forecast";
 import type { CropVariety } from "@/lib/cropData";
 import { fetchWeather } from "@/lib/weather";
 import { useApp } from "@/lib/AppContext";
@@ -110,12 +112,12 @@ export default function CropsPage() {
     return () => { cancelled = true; };
   }, [location]);
 
-  // Build recommendation
+  // Build recommendation from the official price history and forecast (simulated when unavailable)
+  const { series } = usePriceSeries(selectedCrop, location.state);
   const recommendation = useMemo(() => {
-    const hist = generatePriceHistory(selectedCrop);
-    const fc = generateForecast(selectedCrop, hist[hist.length - 1].price);
-    return getRecommendation(selectedCrop, hist, fc);
-  }, [selectedCrop]);
+    const s = series ?? simulatedPriceSeries(selectedCrop.id, selectedCrop.basePrice);
+    return getRecommendation(selectedCrop, s.history, s.forecast);
+  }, [selectedCrop, series]);
 
   // Read once on mount: new Date() during render is impure
   const [hour] = useState(() => new Date().getHours());
@@ -146,7 +148,7 @@ export default function CropsPage() {
             📍 {location.district}, {location.state} · {L.greeting}, {greeting}!
           </div>
         </div>
-        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+        <div className="responsive-header-controls">
           <div style={{ display: "flex", gap: 4, background: "var(--accent)", padding: 4, borderRadius: 10, border: "1px solid var(--border)" }}>
             <button
               onClick={() => setViewMode("grid")}

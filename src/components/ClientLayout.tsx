@@ -6,10 +6,16 @@ import { getCurrentUser, syncSession } from "@/lib/auth";
 import { useApp } from "@/lib/AppContext";
 
 import NotificationManager from "@/components/NotificationManager";
+import InstallApp from "@/components/InstallApp";
 
 const PUBLIC = ["/login"];
 
 const noopSubscribe = () => () => {};
+
+// Every screen is shown inside the phone-sized frame (see .app-frame in globals.css)
+function PhoneFrame({ children }: { children: React.ReactNode }) {
+  return <div className="app-shell"><div className="app-frame">{children}</div></div>;
+}
 
 export default function ClientLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
@@ -31,18 +37,20 @@ export default function ClientLayout({ children }: { children: React.ReactNode }
     if (isClient && !isPublic && !hasUser) router.replace("/login");
   }, [isClient, isPublic, hasUser, pathname, router]);
 
-  if (isPublic) return <>{children}</>;
+  if (isPublic) return <PhoneFrame><div className="frame-scroll">{children}</div><InstallApp /></PhoneFrame>;
   if (!ready) return (
-    <div style={{ display: "flex", alignItems: "center", justifyContent: "center", minHeight: "100vh", background: "var(--bg)" }}>
+    <PhoneFrame>
+    <div style={{ display: "flex", alignItems: "center", justifyContent: "center", flex: 1, background: "var(--bg)" }}>
       <div style={{ textAlign: "center" }}>
         <div style={{ fontSize: 48, marginBottom: 16 }}>🌾</div>
         <div style={{ color: "var(--text-muted)", fontSize: 14 }}>Loading AgriPredict...</div>
       </div>
     </div>
+    </PhoneFrame>
   );
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", minHeight: "100vh" }}>
+    <PhoneFrame>
       {/* Mobile Top Header */}
       <div className="mobile-header" style={{
         alignItems: "center",
@@ -69,7 +77,7 @@ export default function ClientLayout({ children }: { children: React.ReactNode }
         <NotificationManager />
       </div>
 
-      <div style={{ display: "flex", flex: 1 }}>
+      <div className="frame-row">
         <Sidebar mobileOpen={mobileOpen} onClose={() => setMobileOpen(false)} />
         
         {/* Mobile Backdrop */}
@@ -88,6 +96,8 @@ export default function ClientLayout({ children }: { children: React.ReactNode }
         )}
         <div className={`main-layout ${pathname === "/chatbot" ? "is-chatbot-layout" : ""}`} style={{ flex: 1 }}>{children}</div>
       </div>
+
+      <InstallApp />
 
       {/* Global Toast Notification */}
       {toast && (
@@ -116,6 +126,6 @@ export default function ClientLayout({ children }: { children: React.ReactNode }
           </div>
         </div>
       )}
-    </div>
+    </PhoneFrame>
   );
 }

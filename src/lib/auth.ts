@@ -1,8 +1,11 @@
 import { getSupabase } from "@/lib/supabase";
 
-// Accounts live in Supabase Auth (passwords are hashed server-side, never stored in the browser).
-// The signed-in user's profile is cached in localStorage so pages can read it synchronously;
-// every change is written to the `profiles` table (see supabase/schema.sql).
+// Two login modes:
+// - Supabase configured: accounts live in Supabase Auth (passwords hashed server-side) and every
+//   profile change is written to the `profiles` table (see supabase/schema.sql).
+// - Supabase not configured: accounts are kept in this browser's localStorage (password stored
+//   as a salted hash). They exist only on this device and are not checked by the server.
+// Either way the signed-in profile is cached in localStorage so pages can read it synchronously.
 
 export interface FarmProfile {
   landSize: number; // in Acres
@@ -47,7 +50,64 @@ const CURRENT_KEY = "agri_current_user";
 const LEGACY_USERS_KEY = "agri_users";
 const DEFAULT_PORTFOLIO = ["rice", "wheat", "tomato", "mustard"];
 const AVATARS = ["🌾", "🌱", "🚜", "🌻", "🥕", "🌿", "🍃", "🫘"];
-const NOT_CONFIGURED = "Login service is not configured. Please try again later.";
+// Browser-only accounts, used when Supabase isn't configured: email → account
+const LOCAL_USERS_KEY = "agri_local_users";
+const LOCAL_ID_PREFIX = "local_";
+
+interface LocalAccount {
+  salt: string;
+  passwordHash: string;
+  profile: SessionUser;
+}
+
+function readLocalAccounts(): Record<string, LocalAccount> {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(LOCAL_USERS_KEY) || "{}");
+    return parsed && typeof parsed === "object" ? parsed : {};
+  } catch { return {}; }
+}
+
+function writeLocalAccounts(accounts: Record<string, LocalAccount>) {
+  localStorage.setItem(LOCAL_USERS_KEY, JSON.stringify(accounts));
+}
+
+function randomId(): string {
+  const bytes = crypto.getRandomValues(new Uint8Array(12));
+  return Array.from(bytes, b => b.toString(16).padStart(2, "0")).join("");
+}
+
+async function hashPassword(password: string, salt: string): Promise<string> {
+  const text = `${salt}:${password}`;
+  // crypto.subtle only exists on https and localhost
+  if (crypto.subtle) {
+    const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text));
+    return Array.from(new Uint8Array(digest), b => b.toString(16).padStart(2, "0")).join("");
+  }
+  // Plain http on a LAN address: a non-cryptographic hash, still better than the password itself
+  let h = 2166136261;
+  for (let i = 0; i < text.length; i++) h = Math.imul(h ^ text.charCodeAt(i), 16777619);
+  return `fnv_${(h >>> 0).toString(16)}`;
+}
+
+async function createLocalAccount(name: string, email: string, password: string, state: string, district: string): Promise<SessionUser> {
+  const salt = randomId();
+  const profile: SessionUser = {
+    id: LOCAL_ID_PREFIX + randomId(),
+    name: name.trim() || email.split("@")[0],
+    email,
+    location: state && district ? `${district}, ${state}` : "",
+    state,
+    district,
+    role: "Farmer",
+    avatar: AVATARS[Math.floor(Math.random() * AVATARS.length)],
+    portfolio: DEFAULT_PORTFOLIO,
+    createdAt: new Date().toISOString(),
+  };
+  const accounts = readLocalAccounts();
+  accounts[email] = { salt, passwordHash: await hashPassword(password, salt), profile };
+  writeLocalAccounts(accounts);
+  return profile;
+}
 
 function rowToSession(row: ProfileRow): SessionUser {
   return {
@@ -121,7 +181,12 @@ export async function register(
   district: string
 ): Promise<AuthResult> {
   const supabase = getSupabase();
-  if (!supabase) return { success: false, error: NOT_CONFIGURED };
+  if (!supabase) {
+    const key = email.trim().toLowerCase();
+    if (readLocalAccounts()[key]) return { success: false, error: "Email already registered. Please sign in." };
+    saveSession(await createLocalAccount(name, key, password, state, district));
+    return { success: true };
+  }
   const { data, error } = await supabase.auth.signUp({
     email: email.trim().toLowerCase(),
     password,
@@ -144,7 +209,21 @@ export async function register(
 
 export async function login(email: string, password: string): Promise<AuthResult> {
   const supabase = getSupabase();
-  if (!supabase) return { success: false, error: NOT_CONFIGURED };
+  if (!supabase) {
+    const key = email.trim().toLowerCase();
+    if (!key || !password) return { success: false, error: "Please enter your email and password." };
+    const account = readLocalAccounts()[key];
+    // First sign-in with a new email creates the account, so there is no separate sign-up step
+    if (!account) {
+      saveSession(await createLocalAccount("", key, password, "", ""));
+      return { success: true };
+    }
+    if ((await hashPassword(password, account.salt)) !== account.passwordHash) {
+      return { success: false, error: "Incorrect email or password. Please try again." };
+    }
+    saveSession(account.profile);
+    return { success: true };
+  }
   const { error } = await supabase.auth.signInWithPassword({ email: email.trim().toLowerCase(), password });
   if (error) return { success: false, error: friendlyError(error.message) };
   const profile = await loadProfile();
@@ -167,8 +246,9 @@ export function syncSession(onChange?: () => void): () => void {
   const supabase = getSupabase();
   if (typeof window !== "undefined") localStorage.removeItem(LEGACY_USERS_KEY);
   if (!supabase) {
-    // Old browser-only sessions are no longer valid
-    if (getCurrentUser()) { saveSession(null); onChange?.(); }
+    // Browser-only mode: keep local sessions, drop one left over from a Supabase login
+    const current = getCurrentUser();
+    if (current && !current.id.startsWith(LOCAL_ID_PREFIX)) { saveSession(null); onChange?.(); }
     return () => {};
   }
 
@@ -201,9 +281,18 @@ export function getCurrentUser(): SessionUser | null {
 function updateProfile(email: string, patch: Partial<SessionUser>, row: Partial<ProfileRow>) {
   const current = getCurrentUser();
   if (!current || current.email !== email) return;
-  saveSession({ ...current, ...patch });
+  const updated = { ...current, ...patch };
+  saveSession(updated);
   const supabase = getSupabase();
-  if (!supabase) return;
+  if (!supabase) {
+    // Browser-only mode: keep the stored account in step so the change survives signing out
+    const accounts = readLocalAccounts();
+    if (accounts[current.email]) {
+      accounts[current.email].profile = updated;
+      writeLocalAccounts(accounts);
+    }
+    return;
+  }
   supabase.from("profiles").update(row).eq("id", current.id).then(({ error }) => {
     if (error) console.error("Could not save profile:", error.message);
   });
