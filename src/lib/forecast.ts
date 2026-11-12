@@ -42,6 +42,8 @@ export interface PriceSeries {
   metrics: BacktestMetrics | null;
   // Why the official series could not be used (set only on simulated fallbacks)
   unavailableReason?: string;
+  // True when data.gov.in refused or dropped the server's connection, so a browser may still reach it
+  officialUnreachable?: boolean;
 }
 
 export const FORECAST_DAYS = 30;

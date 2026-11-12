@@ -47,6 +47,7 @@ it exists only on that device.
 |---|---|
 | `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` | Optional: Supabase login and per-user data. Run `supabase/schema.sql` in the project once. |
 | `DATA_GOV_API_KEY` | Official Agmarknet prices and price history (free key from data.gov.in). |
+| `NEXT_PUBLIC_DATA_GOV_API_KEY` | The same key, for hosts that data.gov.in refuses (Vercel does get refused): the visitor's browser then fetches the official prices itself. It is visible to anyone using the site, so use only the free key. |
 | `GROQ_API_KEY` | AgriBot answers and the document scanner. |
 | `NEXT_PUBLIC_VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY`, `VAPID_SUBJECT` | Push notifications. Generate keys with `node scripts/gen_vapid.cjs`. |
 | `SUPABASE_SECRET_KEY`, `PUSH_ADMIN_TOKEN` | Optional: durable push subscriptions and broadcast pushes. |

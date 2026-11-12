@@ -1,5 +1,6 @@
 "use client";
 
+import { fetchMandiPrices } from "@/lib/mandiClient";
 import { useState, useEffect, useMemo } from "react";
 import { CROPS, getMandiComparison, formatPrice, MandiInfo } from "@/lib/cropData";
 import { useApp } from "@/lib/AppContext";
@@ -55,14 +56,11 @@ export default function MandiComparison({ initialCropId, compact = false }: Mand
       let official = false;
       let priceDate: string | null = null;
       try {
-        const res = await fetch(`/api/mandi-prices?crop=${encodeURIComponent(selectedCrop.name)}&state=${encodeURIComponent(selectedState)}&district=${encodeURIComponent(selectedDistrict)}`);
-        if (res.ok) {
-          const json = await res.json();
-          if (json.topMandis && json.topMandis.length > 0) {
-            data = json.topMandis;
-            official = json.live === true;
-            priceDate = typeof json.priceDate === "string" ? json.priceDate : null;
-          }
+        const json = await fetchMandiPrices(selectedCrop.name, selectedState, selectedDistrict);
+        if (json?.topMandis && json.topMandis.length > 0) {
+          data = json.topMandis;
+          official = json.live === true;
+          priceDate = typeof json.priceDate === "string" ? json.priceDate : null;
         }
       } catch (err) {
         console.error("Live Mandi API error:", err);

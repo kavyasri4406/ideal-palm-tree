@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { getRecommendation, formatPrice, getCropById } from "@/lib/cropData";
 import { usePriceSeries, dayLabel } from "@/lib/usePriceSeries";
+import { fetchMandiPrices } from "@/lib/mandiClient";
 import { PRICE_LABELS } from "@/lib/priceSeriesLabels";
 import MandiComparison from "@/components/MandiComparison";
 import { useApp } from "@/lib/AppContext";
@@ -58,8 +59,7 @@ export default function CropDetailPage() {
     if (!foundCrop) return;
     const controller = new AbortController();
     const key = `${foundCrop.name}|${location.state}|${location.district}`;
-    fetch(`/api/mandi-prices?crop=${encodeURIComponent(foundCrop.name)}&state=${encodeURIComponent(location.state)}&district=${encodeURIComponent(location.district)}`, { signal: controller.signal })
-      .then(res => (res.ok ? res.json() : null))
+    fetchMandiPrices(foundCrop.name, location.state, location.district, controller.signal)
       .then(json => {
         if (controller.signal.aborted) return;
         const price = Number(json?.wholesaleMandiRateQuintal);

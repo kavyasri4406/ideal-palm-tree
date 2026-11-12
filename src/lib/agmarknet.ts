@@ -1,6 +1,6 @@
 // Server-side client for Agmarknet's "Current Daily Price of Various Commodities from
 // Various Markets (Mandi)" dataset on data.gov.in — the official daily APMC prices.
-// Prices are ₹ per quintal. Requires DATA_GOV_API_KEY.
+// Prices are ₹ per quintal. Requires DATA_GOV_API_KEY (server) or NEXT_PUBLIC_DATA_GOV_API_KEY (browser).
 
 const RESOURCE_URL = "https://api.data.gov.in/resource/9ef84268-d588-465a-a308-a864a43d0070";
 const CACHE_TTL_MS = 60 * 60 * 1000;
@@ -62,8 +62,17 @@ export const COMMODITY_NAMES: Record<string, string[]> = {
 
 const cache = new Map<string, { at: number; records: Promise<AgmarknetRecord[]> }>();
 
+/**
+ * The data.gov.in key. On the server it is DATA_GOV_API_KEY. data.gov.in refuses connections from
+ * some cloud hosts (for example Vercel), so the browser can also call it directly with
+ * NEXT_PUBLIC_DATA_GOV_API_KEY (a free key; anything in a browser bundle is public).
+ */
+export function agmarknetKey(): string {
+  return process.env.DATA_GOV_API_KEY || process.env.NEXT_PUBLIC_DATA_GOV_API_KEY || "";
+}
+
 export function hasAgmarknetKey(): boolean {
-  return !!process.env.DATA_GOV_API_KEY;
+  return !!agmarknetKey();
 }
 
 // Agmarknet spellings vary ("Green Gram (Moong)" vs "Green Gram(Moong)"), so compare loosely
@@ -89,7 +98,7 @@ function toNumber(v: unknown): number {
 
 async function fetchStateRecords(agState: string): Promise<AgmarknetRecord[]> {
   const params = new URLSearchParams({
-    "api-key": process.env.DATA_GOV_API_KEY || "",
+    "api-key": agmarknetKey(),
     format: "json",
     limit: String(MAX_RECORDS),
     "filters[state.keyword]": agState,
