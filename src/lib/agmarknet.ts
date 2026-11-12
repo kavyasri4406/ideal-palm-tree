@@ -155,3 +155,10 @@ export async function getAgmarknetPrices(cropId: string, state: string, district
   }
   return [];
 }
+
+/** "fetch failed" alone says nothing; Node puts the real reason (ETIMEDOUT, ECONNRESET, …) in `cause`. */
+export function describeError(err: unknown): string {
+  if (!(err instanceof Error)) return String(err);
+  const cause = (err as Error & { cause?: { code?: string; message?: string } }).cause;
+  return cause ? `${err.message} (${cause.code || cause.message || "unknown cause"})` : err.message;
+}

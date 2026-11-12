@@ -40,6 +40,8 @@ export interface PriceSeries {
   forecast: ForecastPoint[];
   params: HoltParams | null;
   metrics: BacktestMetrics | null;
+  // Why the official series could not be used (set only on simulated fallbacks)
+  unavailableReason?: string;
 }
 
 export const FORECAST_DAYS = 30;

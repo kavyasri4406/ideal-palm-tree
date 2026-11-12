@@ -1,7 +1,7 @@
 import { getStrictDistrictMandis } from "@/lib/mandiDatabase";
 import { CROPS, type MandiInfo } from "@/lib/cropData";
 import { groqChat, hasGroqKey, parseJsonReply } from "@/lib/groq";
-import { getAgmarknetPrices, hasAgmarknetKey } from "@/lib/agmarknet";
+import { describeError, getAgmarknetPrices, hasAgmarknetKey } from "@/lib/agmarknet";
 import { LIMITS, rateLimited } from "@/lib/apiGuard";
 import { NextRequest, NextResponse } from "next/server";
 
@@ -103,7 +103,7 @@ export async function GET(req: NextRequest) {
         });
       }
     } catch (err) {
-      console.warn("Agmarknet prices unavailable, falling back to estimates:", err instanceof Error ? err.message : err);
+      console.warn("Agmarknet prices unavailable, falling back to estimates:", describeError(err));
     }
   }
 

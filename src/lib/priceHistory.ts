@@ -2,7 +2,7 @@
 // Commodity" dataset on data.gov.in, plus the forecast built on it. Prices are ₹ per quintal.
 // Requires DATA_GOV_API_KEY; without it (or without recent data) a labelled simulation is returned.
 
-import { COMMODITY_NAMES, STATE_ALIASES, hasAgmarknetKey } from "@/lib/agmarknet";
+import { COMMODITY_NAMES, STATE_ALIASES, describeError, hasAgmarknetKey } from "@/lib/agmarknet";
 import { CROPS, type Crop } from "@/lib/cropData";
 import { aggregateDaily, buildPriceSeries, simulatedPriceSeries, todayIso, addDays, type DailyPrice, type PriceSeries } from "@/lib/forecast";
 
@@ -60,21 +60,28 @@ function isUsable(daily: DailyPrice[]): boolean {
 
 async function loadSeries(crop: Crop, state: string): Promise<PriceSeries> {
   const names = COMMODITY_NAMES[crop.id];
+  let reason = "no official price history for this crop";
   // Official prices are ₹/quintal, so only use them for crops priced per quintal
-  if (names && crop.unit === "quintal" && hasAgmarknetKey()) {
-    const states = [...new Set([STATE_ALIASES[state] || state, state])];
-    for (const name of names.flatMap(n => n.split("|"))) {
-      for (const agState of states) {
-        try {
-          const daily = await fetchDaily(name, agState);
-          if (isUsable(daily)) return buildPriceSeries(daily, { source: "agmarknet", scope: state, commodity: name });
-        } catch (err) {
-          console.warn(`Price history fetch failed for ${name} in ${agState}:`, err);
+  if (names && crop.unit === "quintal") {
+    if (!hasAgmarknetKey()) {
+      reason = "DATA_GOV_API_KEY is not set on the server";
+    } else {
+      reason = `no recent official data for ${crop.name} in ${state}`;
+      const states = [...new Set([STATE_ALIASES[state] || state, state])];
+      for (const name of names.flatMap(n => n.split("|"))) {
+        for (const agState of states) {
+          try {
+            const daily = await fetchDaily(name, agState);
+            if (isUsable(daily)) return buildPriceSeries(daily, { source: "agmarknet", scope: state, commodity: name });
+          } catch (err) {
+            reason = `could not reach data.gov.in: ${describeError(err)}`;
+            console.warn(`Price history fetch failed for ${name} in ${agState}: ${reason}`);
+          }
         }
       }
     }
   }
-  return simulatedPriceSeries(crop.id, crop.basePrice, HISTORY_DAYS);
+  return { ...simulatedPriceSeries(crop.id, crop.basePrice, HISTORY_DAYS), unavailableReason: reason };
 }
 
 export function findCrop(query: string): Crop | undefined {
