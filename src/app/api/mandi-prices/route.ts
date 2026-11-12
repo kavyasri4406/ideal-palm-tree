@@ -1,7 +1,8 @@
 import { getStrictDistrictMandis } from "@/lib/mandiDatabase";
-import { CROPS, type MandiInfo } from "@/lib/cropData";
+import { type MandiInfo } from "@/lib/cropData";
 import { groqChat, hasGroqKey, parseJsonReply } from "@/lib/groq";
-import { describeError, getAgmarknetPrices, hasAgmarknetKey } from "@/lib/agmarknet";
+import { describeError, hasAgmarknetKey } from "@/lib/agmarknet";
+import { fetchLiveMandi, findCrop } from "@/lib/liveMandi";
 import { LIMITS, rateLimited } from "@/lib/apiGuard";
 import { NextRequest, NextResponse } from "next/server";
 
@@ -9,18 +10,11 @@ import { NextRequest, NextResponse } from "next/server";
 // crop was reported today; otherwise estimates (AI-generated when a Groq key is set, else modelled
 // from each crop's base price).
 
-const AGMARKNET_SOURCE = "Agmarknet, Govt. of India (data.gov.in)";
-const MAX_LIVE_MANDIS = 8;
 const AI_SOURCE = "AI-estimated indicative rates (not official Agmarknet data)";
 const MODEL_SOURCE = "Indicative estimate from AgriPredict price model (verify at agmarknet.gov.in)";
 
 function uid(): string {
   return Math.random().toString(36).slice(2, 7);
-}
-
-function findCrop(crop: string) {
-  const q = crop.trim().toLowerCase();
-  return CROPS.find(c => c.name.toLowerCase() === q || c.id === q);
 }
 
 function toNumber(v: unknown): number | null {
@@ -62,47 +56,14 @@ export async function GET(req: NextRequest) {
   const knownCrop = findCrop(crop);
   const unit = knownCrop?.unit || "quintal";
 
-  // Official prices are ₹/quintal, so only use them for crops priced per quintal
+  // True when data.gov.in refused this server's connection; the browser may still be able to reach it
+  let officialUnreachable = false;
   if (knownCrop && unit === "quintal" && hasAgmarknetKey()) {
     try {
-      const records = (await getAgmarknetPrices(knownCrop.id, state, district)).slice(0, MAX_LIVE_MANDIS);
-      if (records.length > 0) {
-        const avg = Math.round(records.reduce((acc, r) => acc + r.modalPrice, 0) / records.length);
-        const best = Math.max(...records.map(r => r.modalPrice));
-        const topMandis: MandiInfo[] = records.map((r, i) => ({
-          id: `agmark_${knownCrop.id}_${i}_${uid()}`,
-          mandiName: r.market,
-          district: r.district,
-          state: r.state,
-          distanceKm: 0,
-          price: r.modalPrice,
-          priceDiff: r.modalPrice - avg,
-          arrivalsTons: 0,
-          trend: "stable",
-          isBestChoice: r.modalPrice === best,
-          // Some markets omit min/max; leave them unset rather than showing ₹0
-          minPrice: r.minPrice > 0 ? r.minPrice : undefined,
-          maxPrice: r.maxPrice > 0 ? r.maxPrice : undefined,
-          arrivalDate: r.arrivalDate
-        }));
-        return NextResponse.json({
-          crop,
-          variety: variety || "All Varieties",
-          location: `${district}, ${state}`,
-          unit,
-          source: AGMARKNET_SOURCE,
-          live: true,
-          priceDate: records[0].arrivalDate,
-          lastUpdated: new Date().toISOString(),
-          wholesaleMandiRateKg: Math.round(avg / 10) / 10,
-          wholesaleMandiRateQuintal: avg,
-          retailRateKg: null,
-          retailRateQuintal: null,
-          marketTrend: "stable",
-          topMandis
-        });
-      }
+      const live = await fetchLiveMandi(crop, variety, state, district);
+      if (live) return NextResponse.json(live);
     } catch (err) {
+      officialUnreachable = true;
       console.warn("Agmarknet prices unavailable, falling back to estimates:", describeError(err));
     }
   }
@@ -150,6 +111,7 @@ Return ONLY a JSON object matching this structure:
           unit,
           source: AI_SOURCE,
           live: false,
+          officialUnreachable,
           lastUpdated: new Date().toISOString(),
           topMandis
         });
@@ -203,6 +165,7 @@ Return ONLY a JSON object matching this structure:
     unit,
     source: MODEL_SOURCE,
     live: false,
+    officialUnreachable,
     lastUpdated: new Date().toISOString(),
     wholesaleMandiRateKg: unit === "quintal" ? round(wholesaleQ / 100) : null,
     wholesaleMandiRateQuintal: unit === "quintal" ? wholesaleQ : null,

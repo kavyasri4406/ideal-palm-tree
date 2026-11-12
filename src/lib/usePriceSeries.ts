@@ -2,6 +2,7 @@
 import { useEffect, useMemo, useState } from "react";
 import type { Crop } from "@/lib/cropData";
 import { simulatedPriceSeries, type PriceSeries } from "@/lib/forecast";
+import { loadOfficialSeriesInBrowser } from "@/lib/priceHistoryClient";
 
 /** "2026-11-10" → "10 Nov" */
 export function dayLabel(iso: string): string {
@@ -29,8 +30,13 @@ export function usePriceSeries(crop: Crop | undefined, state: string): { series:
     const requestKey = `${crop.id}|${state}`;
     fetch(`/api/price-history?crop=${encodeURIComponent(crop.id)}&state=${encodeURIComponent(state)}`, { signal: controller.signal })
       .then(res => (res.ok ? res.json() : null))
-      .then(json => {
-        if (!controller.signal.aborted) setLoaded({ key: requestKey, series: isPriceSeries(json) ? json : null });
+      .then(async json => {
+        let series: PriceSeries | null = isPriceSeries(json) ? json : null;
+        // The server could not reach data.gov.in (it refuses some cloud hosts), so try from here
+        if (series && series.source === "simulated" && series.officialUnreachable) {
+          series = (await loadOfficialSeriesInBrowser(crop, state).catch(() => null)) ?? series;
+        }
+        if (!controller.signal.aborted) setLoaded({ key: requestKey, series });
       })
       .catch(err => {
         if (controller.signal.aborted) return;

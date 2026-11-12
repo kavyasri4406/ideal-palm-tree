@@ -1,8 +1,9 @@
-// Server-side daily price history from Agmarknet's "Variety-wise Daily Market Prices Data of
+// Daily price history from Agmarknet's "Variety-wise Daily Market Prices Data of
 // Commodity" dataset on data.gov.in, plus the forecast built on it. Prices are ₹ per quintal.
-// Requires DATA_GOV_API_KEY; without it (or without recent data) a labelled simulation is returned.
+// Runs on the server; the browser reuses `tryOfficialSeries` when data.gov.in refuses the server.
+// Without a key (or recent data) a labelled simulation is returned.
 
-import { COMMODITY_NAMES, STATE_ALIASES, describeError, hasAgmarknetKey } from "@/lib/agmarknet";
+import { COMMODITY_NAMES, STATE_ALIASES, agmarknetKey, describeError, hasAgmarknetKey } from "@/lib/agmarknet";
 import { CROPS, type Crop } from "@/lib/cropData";
 import { aggregateDaily, buildPriceSeries, simulatedPriceSeries, todayIso, addDays, type DailyPrice, type PriceSeries } from "@/lib/forecast";
 
@@ -23,8 +24,10 @@ const cache = new Map<string, { at: number; ttl: number; series: Promise<PriceSe
 
 async function fetchPage(commodity: string, state: string, offset: number): Promise<Record<string, unknown>[]> {
   const params = new URLSearchParams({
-    "api-key": process.env.DATA_GOV_API_KEY || "",
+    "api-key": agmarknetKey(),
     format: "json",
+    // Only the columns the model needs (a response is about a third of the size)
+    fields: "Arrival_Date,Modal_Price,Market",
     limit: String(PAGE_SIZE),
     offset: String(offset),
     "filters[State]": state,
@@ -37,12 +40,12 @@ async function fetchPage(commodity: string, state: string, offset: number): Prom
   return Array.isArray(json?.records) ? json.records : [];
 }
 
-async function fetchDaily(commodity: string, state: string): Promise<DailyPrice[]> {
+async function fetchDaily(commodity: string, state: string, targetDays: number): Promise<DailyPrice[]> {
   const records = await fetchPage(commodity, state, 0);
   const days = aggregateDaily(records, HISTORY_DAYS).length;
-  // States with many mandis fill a page in a few weeks; fetch the older pages needed for TARGET_DAYS
-  if (records.length === PAGE_SIZE && days > 0 && days < TARGET_DAYS) {
-    const pagesNeeded = Math.min(MAX_PAGES, Math.ceil(TARGET_DAYS / days));
+  // States with many mandis fill a page in a few weeks; fetch the older pages needed for targetDays
+  if (records.length === PAGE_SIZE && days > 0 && days < targetDays) {
+    const pagesNeeded = Math.min(MAX_PAGES, Math.ceil(targetDays / days));
     const offsets = Array.from({ length: pagesNeeded - 1 }, (_, i) => (i + 1) * PAGE_SIZE);
     const older = await Promise.allSettled(offsets.map(offset => fetchPage(commodity, state, offset)));
     for (const page of older) {
@@ -58,30 +61,46 @@ function isUsable(daily: DailyPrice[]): boolean {
   return daily[daily.length - 1].date >= addDays(todayIso(), -MAX_STALE_DAYS);
 }
 
-async function loadSeries(crop: Crop, state: string): Promise<PriceSeries> {
+export interface OfficialAttempt {
+  series: PriceSeries | null;
+  reason: string;
+  // data.gov.in could not be reached (as opposed to having no data)
+  unreachable: boolean;
+}
+
+/** Tries the official daily history for a crop in a state. Never throws. */
+export async function tryOfficialSeries(crop: Crop, state: string, targetDays: number = TARGET_DAYS): Promise<OfficialAttempt> {
   const names = COMMODITY_NAMES[crop.id];
-  let reason = "no official price history for this crop";
   // Official prices are ₹/quintal, so only use them for crops priced per quintal
-  if (names && crop.unit === "quintal") {
-    if (!hasAgmarknetKey()) {
-      reason = "DATA_GOV_API_KEY is not set on the server";
-    } else {
-      reason = `no recent official data for ${crop.name} in ${state}`;
-      const states = [...new Set([STATE_ALIASES[state] || state, state])];
-      for (const name of names.flatMap(n => n.split("|"))) {
-        for (const agState of states) {
-          try {
-            const daily = await fetchDaily(name, agState);
-            if (isUsable(daily)) return buildPriceSeries(daily, { source: "agmarknet", scope: state, commodity: name });
-          } catch (err) {
-            reason = `could not reach data.gov.in: ${describeError(err)}`;
-            console.warn(`Price history fetch failed for ${name} in ${agState}: ${reason}`);
-          }
-        }
+  if (!names || crop.unit !== "quintal") return { series: null, reason: "no official price history for this crop", unreachable: false };
+  if (!hasAgmarknetKey()) return { series: null, reason: "no data.gov.in key is set", unreachable: false };
+
+  let reason = `no recent official data for ${crop.name} in ${state}`;
+  let unreachable = false;
+  const states = [...new Set([STATE_ALIASES[state] || state, state])];
+  for (const name of names.flatMap(n => n.split("|"))) {
+    for (const agState of states) {
+      try {
+        const daily = await fetchDaily(name, agState, targetDays);
+        if (isUsable(daily)) return { series: buildPriceSeries(daily, { source: "agmarknet", scope: state, commodity: name }), reason: "", unreachable: false };
+      } catch (err) {
+        unreachable = true;
+        reason = `could not reach data.gov.in: ${describeError(err)}`;
+        console.warn(`Price history fetch failed for ${name} in ${agState}: ${reason}`);
       }
     }
   }
-  return { ...simulatedPriceSeries(crop.id, crop.basePrice, HISTORY_DAYS), unavailableReason: reason };
+  return { series: null, reason, unreachable };
+}
+
+async function loadSeries(crop: Crop, state: string): Promise<PriceSeries> {
+  const attempt = await tryOfficialSeries(crop, state);
+  if (attempt.series) return attempt.series;
+  return {
+    ...simulatedPriceSeries(crop.id, crop.basePrice, HISTORY_DAYS),
+    unavailableReason: attempt.reason,
+    ...(attempt.unreachable ? { officialUnreachable: true } : {}),
+  };
 }
 
 export function findCrop(query: string): Crop | undefined {
