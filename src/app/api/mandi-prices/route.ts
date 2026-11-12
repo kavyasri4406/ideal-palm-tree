@@ -1,7 +1,7 @@
 import { getStrictDistrictMandis } from "@/lib/mandiDatabase";
 import { type MandiInfo } from "@/lib/cropData";
 import { groqChat, hasGroqKey, parseJsonReply } from "@/lib/groq";
-import { describeError, hasAgmarknetKey } from "@/lib/agmarknet";
+import { dataGovBlocked, describeError, hasAgmarknetKey } from "@/lib/agmarknet";
 import { fetchLiveMandi, findCrop } from "@/lib/liveMandi";
 import { LIMITS, rateLimited } from "@/lib/apiGuard";
 import { NextRequest, NextResponse } from "next/server";
@@ -59,16 +59,23 @@ export async function GET(req: NextRequest) {
   // True when data.gov.in refused this server's connection; the browser may still be able to reach it
   let officialUnreachable = false;
   if (knownCrop && unit === "quintal" && hasAgmarknetKey()) {
-    try {
-      const live = await fetchLiveMandi(crop, variety, state, district);
-      if (live) return NextResponse.json(live);
-    } catch (err) {
+    if (dataGovBlocked()) {
       officialUnreachable = true;
-      console.warn("Agmarknet prices unavailable, falling back to estimates:", describeError(err));
+    } else {
+      try {
+        const live = await fetchLiveMandi(crop, variety, state, district);
+        if (live) return NextResponse.json(live);
+      } catch (err) {
+        officialUnreachable = true;
+        console.info("Agmarknet prices unavailable, falling back to estimates:", describeError(err));
+      }
     }
   }
+  // The browser fetches the official prices itself in this case, so an AI estimate would only
+  // spend Groq allowance that the chatbot and scanner need
+  const browserWillFetch = officialUnreachable && !!process.env.NEXT_PUBLIC_DATA_GOV_API_KEY;
 
-  if (hasGroqKey()) {
+  if (hasGroqKey() && !browserWillFetch) {
     const prompt = `You estimate Indian APMC mandi wholesale and retail prices for:
 Crop: ${crop}
 Variety: ${variety || "All Varieties"}
@@ -94,7 +101,8 @@ Return ONLY a JSON object matching this structure:
       model: process.env.GROQ_TEXT_MODEL || "qwen/qwen3.8-27b",
       messages: [{ role: "user", content: prompt }],
       temperature: 0.2,
-      maxTokens: 1500,
+      // Groq rejects a request that asks for more output than the per-minute allowance (~1,000)
+      maxTokens: 900,
       json: true,
       timeoutMs: 20000
     });

@@ -3,7 +3,7 @@
 // Runs on the server; the browser reuses `tryOfficialSeries` when data.gov.in refuses the server.
 // Without a key (or recent data) a labelled simulation is returned.
 
-import { COMMODITY_NAMES, STATE_ALIASES, agmarknetKey, describeError, hasAgmarknetKey } from "@/lib/agmarknet";
+import { COMMODITY_NAMES, STATE_ALIASES, agmarknetKey, dataGovBlocked, dataGovFetch, describeError, hasAgmarknetKey } from "@/lib/agmarknet";
 import { CROPS, type Crop } from "@/lib/cropData";
 import { aggregateDaily, buildPriceSeries, simulatedPriceSeries, todayIso, addDays, type DailyPrice, type PriceSeries } from "@/lib/forecast";
 
@@ -34,7 +34,7 @@ async function fetchPage(commodity: string, state: string, offset: number): Prom
     "filters[Commodity]": commodity,
     "sort[Arrival_Date]": "desc",
   });
-  const res = await fetch(`${HISTORY_URL}?${params}`, { signal: AbortSignal.timeout(30000), cache: "no-store" });
+  const res = await dataGovFetch(`${HISTORY_URL}?${params}`, 30000);
   if (!res.ok) throw new Error(`Agmarknet history HTTP ${res.status}`);
   const json = await res.json();
   return Array.isArray(json?.records) ? json.records : [];
@@ -75,6 +75,9 @@ export async function tryOfficialSeries(crop: Crop, state: string, targetDays: n
   if (!names || crop.unit !== "quintal") return { series: null, reason: "no official price history for this crop", unreachable: false };
   if (!hasAgmarknetKey()) return { series: null, reason: "no data.gov.in key is set", unreachable: false };
 
+  const refused = { series: null, reason: "data.gov.in refuses this server; the browser loads the data instead", unreachable: true };
+  if (dataGovBlocked()) return refused;
+
   let reason = `no recent official data for ${crop.name} in ${state}`;
   let unreachable = false;
   const states = [...new Set([STATE_ALIASES[state] || state, state])];
@@ -86,7 +89,9 @@ export async function tryOfficialSeries(crop: Crop, state: string, targetDays: n
       } catch (err) {
         unreachable = true;
         reason = `could not reach data.gov.in: ${describeError(err)}`;
-        console.warn(`Price history fetch failed for ${name} in ${agState}: ${reason}`);
+        console.info(`Price history fetch failed for ${name} in ${agState}: ${reason}`);
+        // The connection itself failed, so the other names and spellings would fail the same way
+        if (dataGovBlocked()) return { ...refused, reason };
       }
     }
   }
