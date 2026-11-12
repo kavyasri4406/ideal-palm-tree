@@ -75,6 +75,29 @@ export function hasAgmarknetKey(): boolean {
   return !!agmarknetKey();
 }
 
+// data.gov.in refuses connections from some cloud hosts. Vercel is one of them (ECONNREFUSED), so
+// there the server does not try at all and the visitor's browser fetches instead. On any other
+// host, a failed connection stops further attempts for a few hours.
+const SERVER_RETRY_AFTER_MS = 6 * 60 * 60 * 1000;
+let serverUnreachableUntil = 0;
+
+/** True when this server should not call data.gov.in. Never true in a browser. */
+export function dataGovBlocked(): boolean {
+  if (typeof window !== "undefined") return false;
+  return !!process.env.VERCEL || Date.now() < serverUnreachableUntil;
+}
+
+/** fetch() for data.gov.in that remembers when the server's connection is refused or dropped. */
+export async function dataGovFetch(url: string, timeoutMs: number): Promise<Response> {
+  if (dataGovBlocked()) throw new Error("data.gov.in is not reachable from this server");
+  try {
+    return await fetch(url, { signal: AbortSignal.timeout(timeoutMs), cache: "no-store" });
+  } catch (err) {
+    if (typeof window === "undefined") serverUnreachableUntil = Date.now() + SERVER_RETRY_AFTER_MS;
+    throw err;
+  }
+}
+
 // Agmarknet spellings vary ("Green Gram (Moong)" vs "Green Gram(Moong)"), so compare loosely
 function normalize(s: string): string {
   return s.toLowerCase().replace(/[^a-z]/g, "");
@@ -103,7 +126,7 @@ async function fetchStateRecords(agState: string): Promise<AgmarknetRecord[]> {
     limit: String(MAX_RECORDS),
     "filters[state.keyword]": agState,
   });
-  const res = await fetch(`${RESOURCE_URL}?${params}`, { signal: AbortSignal.timeout(15000), cache: "no-store" });
+  const res = await dataGovFetch(`${RESOURCE_URL}?${params}`, 15000);
   if (!res.ok) throw new Error(`Agmarknet HTTP ${res.status}`);
   const json = await res.json();
   if (!Array.isArray(json?.records)) throw new Error("Agmarknet returned no records");
