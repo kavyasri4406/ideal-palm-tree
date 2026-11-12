@@ -688,5 +688,8 @@ img, video, iframe, canvas, svg {
    be clipped) instead of fitting the screen */
 .app-frame .main-layout > * { width: 100%; min-width: 0; }
 .app-frame .sidebar { min-height: 0; height: 100%; }
+/* A pinned page header (title, tabs, dropdowns) can fill half a phone screen and leave only the
+   other half to scroll, so in the frame it scrolls away with the page */
+.app-frame .page-header { position: static; }
 .app-frame .login-page { min-height: 100%; }
 
